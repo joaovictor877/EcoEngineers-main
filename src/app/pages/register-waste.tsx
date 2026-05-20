@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { io, Socket } from "socket.io-client";
 import api, { API_URL } from "../lib/api";
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:4000";
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
 
 type DevStatus = "conectado" | "desconectado" | "erro" | "ativo" | "inativo" | "ativa" | "inativa";
 
