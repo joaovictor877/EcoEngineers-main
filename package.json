@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build",
     "start": "node server.js",
+    "prestart": "node -e \"const fs=require('fs');if(!fs.existsSync('dist/index.html')){const {execSync}=require('child_process');console.log('Building frontend...');execSync('npm run build',{stdio:'inherit'});}\"",
     "dev": "node --watch server.js",
     "dev:full": "vite"
   },

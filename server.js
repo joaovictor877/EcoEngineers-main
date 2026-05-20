@@ -92,10 +92,6 @@ function authMiddleware(req, res, next) {
   }
 }
 
-app.get('/', (req, res) => {
-  res.redirect('/app');
-});
-
 // Health check
 app.get('/api/health', async (req, res) => {
   try {
@@ -226,14 +222,6 @@ const hasFrontendBuild = fs.existsSync(distIndex);
 
 if (hasFrontendBuild) {
   app.use(express.static(distDir));
-
-  app.get('/app', (req, res) => {
-    res.sendFile(distIndex);
-  });
-
-  app.get('/app/*', (req, res) => {
-    res.sendFile(distIndex);
-  });
 
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) return next();
