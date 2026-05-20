@@ -1,0 +1,8 @@
+@import 'tailwindcss' source(none);
+@source '../**/*.{js,ts,jsx,tsx}';
+
+/* NOTE:
+ * 'tw-animate-css' is not installed and breaks production builds (e.g. Azure).
+ * If you want animations, either install the dependency or switch to a supported plugin.
+ */
+/* @import 'tw-animate-css'; */
