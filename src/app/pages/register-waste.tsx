@@ -80,7 +80,7 @@ export function RegisterWaste() {
   });
 
   const [cameraUrl, setCameraUrl] = useState(
-    import.meta.env.VITE_CAMERA_URL || "http://192.168.1.120:8080"
+    import.meta.env.VITE_CAMERA_URL || "https://camera.joaovictor.app.br"
   );
   const [cameraActive, setCameraActive] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -301,10 +301,14 @@ export function RegisterWaste() {
             <div className="aspect-video bg-gray-900 flex items-center justify-center overflow-hidden">
               {cameraActive ? (
                 <img
-                  src={`/api/cameras/proxy-stream?url=${encodeURIComponent(`${cameraUrl}/video`)}`}
+                  src={
+                    cameraUrl.startsWith("https://")
+                      ? `${cameraUrl}/video`
+                      : `/api/cameras/proxy-stream?url=${encodeURIComponent(`${cameraUrl}/video`)}`
+                  }
                   alt="Camera feed"
                   className="w-full h-full object-cover"
-                  onError={() => { setCameraActive(false); toast.error("Câmera inacessível. Verifique se ela está na mesma rede que o servidor."); }}
+                  onError={() => { setCameraActive(false); toast.error("Câmera inacessível. Verifique a URL."); }}
                 />
               ) : capturedImage ? (
                 <img src={capturedImage} alt="Captura IA" className="w-full h-full object-cover" />
@@ -321,7 +325,7 @@ export function RegisterWaste() {
                 type="text"
                 value={cameraUrl}
                 onChange={(e) => setCameraUrl(e.target.value)}
-                placeholder="http://192.168.1.120:8080"
+                placeholder="https://camera.joaovictor.app.br"
                 className="w-full text-sm px-3 py-2 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none transition-all"
               />
               <div className="grid grid-cols-2 gap-2">
