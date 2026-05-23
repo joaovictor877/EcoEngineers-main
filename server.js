@@ -292,9 +292,28 @@ app.get('/api/dashboard/stats/ia', authMiddleware, async (req, res) => {
 // POST /api/residuos — registro principal (registros_residuos + wastes)
 app.post('/api/residuos', authMiddleware, async (req, res) => {
   try {
-    const { material_id, peso, setor_origem, destino, observacao, analise_ia_id } = req.body;
+    const { material_id, peso, setor_origem, destino, observacao } = req.body;
+    let { analise_ia_id } = req.body;
+
     if (!material_id) return res.status(400).json({ error: 'material_id é obrigatório' });
     if (!peso || Number(peso) <= 0) return res.status(400).json({ error: 'peso deve ser maior que zero' });
+
+    // Validate material exists (prevents FK violation)
+    const matCheck = await dbQuery('SELECT id FROM materials WHERE id = $1', [material_id]);
+    if (!matCheck.rows || !matCheck.rows.length) {
+      return res.status(400).json({ error: 'Material não encontrado' });
+    }
+
+    // Validate analise_ia_id exists — if not, silently drop it to avoid FK violation
+    if (analise_ia_id) {
+      try {
+        const iaCheck = await dbQuery('SELECT id FROM analises_ia WHERE id = $1', [analise_ia_id]);
+        if (!iaCheck.rows || !iaCheck.rows.length) analise_ia_id = null;
+      } catch (_) {
+        // analises_ia table might not exist yet, safe to ignore
+        analise_ia_id = null;
+      }
+    }
 
     const recovered = ['reaproveitamento', 'reciclagem', 'venda'].includes(destino) ? 1 : 0;
     const statusMap = { reaproveitamento: 'reaproveitamento', reciclagem: 'reaproveitamento', venda: 'reaproveitamento', descarte: 'descarte' };
