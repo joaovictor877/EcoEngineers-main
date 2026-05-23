@@ -10,6 +10,7 @@ export function PageHeader({ userName = "João Silva", userRole = "Operador de L
   const navigate = useNavigate();
 
   const handleLogout = () => {
+    localStorage.removeItem("token");
     navigate("/login");
   };
 

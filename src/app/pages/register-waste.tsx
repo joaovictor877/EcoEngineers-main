@@ -7,7 +7,10 @@ import { toast } from "sonner";
 import { io, Socket } from "socket.io-client";
 import api, { API_URL } from "../lib/api";
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
+const SOCKET_URL =
+  import.meta.env.VITE_SOCKET_URL ||
+  API_URL ||
+  (import.meta.env.DEV ? "http://localhost:4000" : undefined);
 
 type DevStatus = "conectado" | "desconectado" | "erro" | "ativo" | "inativo" | "ativa" | "inativa";
 
@@ -76,6 +79,12 @@ export function RegisterWaste() {
 
   const socketRef = useRef<Socket | null>(null);
 
+  const getApiErrorMessage = (error: any, fallback: string) => {
+    const serverMessage = error?.response?.data?.error;
+    if (typeof serverMessage === "string" && serverMessage.trim()) return serverMessage;
+    return fallback;
+  };
+
   // ── Socket.IO ──────────────────────────────────────────────
   useEffect(() => {
     socketRef.current = io(SOCKET_URL, { transports: ["websocket", "polling"] });
@@ -133,8 +142,8 @@ export function RegisterWaste() {
     try {
       const { data } = await api.post<AIResult>("/api/ia/capturar-camera", { camera_url: cameraUrl });
       applyAIResult(data);
-    } catch {
-      toast.error("Falha ao capturar imagem da câmera. Verifique a URL.");
+    } catch (error: any) {
+      toast.error(getApiErrorMessage(error, "Falha ao capturar imagem da câmera. Verifique a URL."));
       setIsAnalyzing(false);
     }
   };
@@ -148,8 +157,8 @@ export function RegisterWaste() {
         headers: { "Content-Type": "multipart/form-data" },
       });
       applyAIResult(data);
-    } catch {
-      toast.error("Falha na análise de IA");
+    } catch (error: any) {
+      toast.error(getApiErrorMessage(error, "Falha na análise de IA"));
       setIsAnalyzing(false);
     }
   };
@@ -166,8 +175,8 @@ export function RegisterWaste() {
         headers: { "Content-Type": "multipart/form-data" },
       });
       applyAIResult(data);
-    } catch {
-      toast.error("Falha na análise");
+    } catch (error: any) {
+      toast.error(getApiErrorMessage(error, "Falha na análise"));
       setIsAnalyzing(false);
     }
   };

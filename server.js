@@ -176,6 +176,36 @@ app.post('/api/materials', authMiddleware, async (req, res) => {
   }
 });
 
+// PUT /api/materials/:id
+app.put('/api/materials/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+    const { name, category, unit } = req.body;
+    if (!name) return res.status(400).json({ error: 'name é obrigatório' });
+    await dbQuery('UPDATE materials SET name=$1, category=$2, unit=$3 WHERE id=$4', [name, category || '', unit || 'kg', id]);
+    const r = await dbQuery('SELECT * FROM materials WHERE id=$1', [id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Material não encontrado' });
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update material' });
+  }
+});
+
+// DELETE /api/materials/:id
+app.delete('/api/materials/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+    await dbQuery('DELETE FROM materials WHERE id=$1', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete material' });
+  }
+});
+
 // Wastes
 app.post('/api/wastes', authMiddleware, async (req, res) => {
   try {

@@ -1,62 +1,205 @@
-import { useState } from "react";
-import { FileDown, Filter } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { FileDown, Filter, TrendingUp, TrendingDown, Package, Recycle, RefreshCw, Printer } from "lucide-react";
 import { toast } from "sonner";
 import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
+  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
+import api from "../lib/api";
 
-// Mock data
-const monthlyData = [
-  { mes: "Set", gerado: 1200, reaproveitado: 950, descartado: 250 },
-  { mes: "Out", gerado: 1450, reaproveitado: 1150, descartado: 300 },
-  { mes: "Nov", gerado: 1100, reaproveitado: 880, descartado: 220 },
-  { mes: "Dez", gerado: 1600, reaproveitado: 1280, descartado: 320 },
-  { mes: "Jan", gerado: 1350, reaproveitado: 1080, descartado: 270 },
-  { mes: "Fev", gerado: 1280, reaproveitado: 1050, descartado: 230 },
-  { mes: "Mar", gerado: 1520, reaproveitado: 1220, descartado: 300 },
-];
+interface Waste {
+  id: number;
+  material_id: number;
+  material_name: string;
+  quantity: number;
+  location: string;
+  recovered: number;
+  value: number;
+  created_at: string;
+}
 
-const departmentData = [
-  { setor: "Produção", total: 3450 },
-  { setor: "Montagem", total: 2780 },
-  { setor: "Estamparia", total: 2190 },
-  { setor: "Pintura", total: 1840 },
-  { setor: "Usinagem", total: 2540 },
-];
+interface DashboardStats {
+  total_kg: number;
+  reused_kg: number;
+  by_material: { name: string; total: number }[];
+}
+
+const MONTHS_PT = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+const COLORS = ["#2E7D32", "#66BB6A", "#F9A825", "#0288D1", "#7B1FA2", "#D32F2F", "#00796B", "#E64A19"];
 
 export function Reports() {
+  const [wastes, setWastes] = useState<Waste[]>([]);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
-    startDate: "2025-09-01",
-    endDate: "2026-03-15",
-    materialType: "",
-    department: "",
+    startDate: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+    endDate: new Date().toISOString().slice(0, 10),
+    materialName: "",
   });
 
-  const handleExportPDF = () => {
-    toast.success("Relatório exportado em PDF!");
+  useEffect(() => { loadData(); }, []);
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [wastesRes, statsRes] = await Promise.all([
+        api.get<Waste[]>("/api/wastes"),
+        api.get<DashboardStats>("/api/dashboard/stats"),
+      ]);
+      setWastes(wastesRes.data);
+      setStats(statsRes.data);
+    } catch {
+      toast.error("Falha ao carregar relatórios");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /* ── filtered wastes ── */
+  const filtered = useMemo(() => {
+    const start = filters.startDate ? new Date(filters.startDate + "T00:00:00") : null;
+    const end   = filters.endDate   ? new Date(filters.endDate   + "T23:59:59") : null;
+    return wastes.filter((w) => {
+      const d = new Date(w.created_at);
+      if (start && d < start) return false;
+      if (end   && d > end)   return false;
+      if (filters.materialName && w.material_name !== filters.materialName) return false;
+      return true;
+    });
+  }, [wastes, filters]);
+
+  /* ── KPIs ── */
+  const totalKg    = filtered.reduce((s, w) => s + Number(w.quantity || 0), 0);
+  const reusedKg   = stats ? Number(stats.reused_kg || 0) : 0;
+  const discarded  = Math.max(0, totalKg - reusedKg);
+  const reusedRate = totalKg > 0 ? ((reusedKg / totalKg) * 100).toFixed(1) : "0.0";
+
+  /* ── monthly chart ── */
+  const monthlyData = useMemo(() => {
+    const map: Record<string, { mes: string; gerado: number }> = {};
+    filtered.forEach((w) => {
+      const d = new Date(w.created_at);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const label = `${MONTHS_PT[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`;
+      if (!map[key]) map[key] = { mes: label, gerado: 0 };
+      map[key].gerado += Number(w.quantity || 0);
+    });
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+  }, [filtered]);
+
+  /* ── by material ── */
+  const byMaterial = useMemo(() => {
+    const map: Record<string, number> = {};
+    filtered.forEach((w) => {
+      const name = w.material_name || "Desconhecido";
+      map[name] = (map[name] || 0) + Number(w.quantity || 0);
+    });
+    return Object.entries(map)
+      .map(([name, total]) => ({ name, total: Math.round(total * 100) / 100 }))
+      .sort((a, b) => b.total - a.total);
+  }, [filtered]);
+
+  /* ── material names for filter ── */
+  const materialNames = useMemo(
+    () => Array.from(new Set(wastes.map((w) => w.material_name).filter(Boolean))).sort(),
+    [wastes]
+  );
+
+  /* ── CSV export ── */
+  const handleExportCSV = () => {
+    if (filtered.length === 0) { toast.error("Nenhum dado para exportar"); return; }
+    const header = ["ID", "Material", "Quantidade (kg)", "Local", "Reaproveitado", "Valor (R$)", "Data"];
+    const rows = filtered.map((w) => [
+      w.id,
+      w.material_name || "",
+      w.quantity,
+      w.location || "",
+      w.recovered ? "Sim" : "Não",
+      w.value || 0,
+      new Date(w.created_at).toLocaleDateString("pt-BR"),
+    ]);
+    const csv = [header, ...rows].map((r) => r.join(";")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ecoengineers-residuos-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Arquivo CSV exportado com sucesso!");
   };
 
-  const handleExportExcel = () => {
-    toast.success("Relatório exportado em Excel!");
+  /* ── PDF print ── */
+  const handlePrint = () => {
+    if (filtered.length === 0) { toast.error("Nenhum dado para imprimir"); return; }
+    const now = new Date().toLocaleDateString("pt-BR", { dateStyle: "long" });
+    const rows = filtered.slice(0, 50).map((w) => `
+      <tr>
+        <td>${w.id}</td>
+        <td>${w.material_name || "—"}</td>
+        <td style="text-align:right">${Number(w.quantity || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} kg</td>
+        <td>${w.location || "—"}</td>
+        <td style="color:${w.recovered ? "#2E7D32" : "#D32F2F"}">${w.recovered ? "Sim" : "Não"}</td>
+        <td style="text-align:right">R$ ${Number(w.value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+        <td>${new Date(w.created_at).toLocaleDateString("pt-BR")}</td>
+      </tr>`).join("");
+    const matRows = byMaterial.map((m) =>
+      `<tr><td>${m.name}</td><td style="text-align:right">${m.total.toLocaleString("pt-BR")} kg</td></tr>`).join("");
+    const win = window.open("", "_blank");
+    if (!win) { toast.error("Popup bloqueado. Permita popups e tente novamente."); return; }
+    win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>Relatório EcoEngineers</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #333; margin: 20px; }
+  h1 { color: #2E7D32; font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: #717182; font-size: 13px; margin-bottom: 24px; }
+  .kpi-row { display: flex; gap: 16px; margin-bottom: 24px; }
+  .kpi { border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px 20px; flex: 1; }
+  .kpi-label { font-size: 11px; color: #717182; }
+  .kpi-value { font-size: 20px; font-weight: bold; color: #424242; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+  th { background: #f5f5f5; padding: 8px; text-align: left; font-size: 11px; }
+  td { padding: 7px 8px; border-bottom: 1px solid #f0f0f0; font-size: 11px; }
+  .section-title { font-size: 14px; font-weight: bold; color: #424242; margin: 16px 0 8px; }
+  .footer { margin-top: 32px; font-size: 10px; color: #999; text-align: center; }
+  @media print { body { margin: 0; } }
+</style></head><body>
+<h1>Relatório de Resíduos — EcoEngineers</h1>
+<div class="subtitle">Gerado em ${now} &nbsp;|&nbsp; Período: ${filters.startDate} a ${filters.endDate}</div>
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Total Gerado</div><div class="kpi-value">${totalKg.toLocaleString("pt-BR")} kg</div></div>
+  <div class="kpi"><div class="kpi-label">Reaproveitado</div><div class="kpi-value" style="color:#2E7D32">${reusedKg.toLocaleString("pt-BR")} kg</div></div>
+  <div class="kpi"><div class="kpi-label">Descartado</div><div class="kpi-value" style="color:#D32F2F">${discarded.toLocaleString("pt-BR")} kg</div></div>
+  <div class="kpi"><div class="kpi-label">Taxa de Reaproveitamento</div><div class="kpi-value" style="color:#2E7D32">${reusedRate}%</div></div>
+</div>
+<div class="section-title">Resumo por Material</div>
+<table><thead><tr><th>Material</th><th>Total (kg)</th></tr></thead><tbody>${matRows}</tbody></table>
+<div class="section-title">Registros de Resíduos (últimos ${Math.min(filtered.length, 50)})</div>
+<table><thead><tr><th>ID</th><th>Material</th><th>Qtd (kg)</th><th>Local</th><th>Reaprov.</th><th>Valor</th><th>Data</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="footer">EcoEngineers &copy; ${new Date().getFullYear()} — Relatório gerado automaticamente</div>
+<script>window.onload=()=>{ window.print(); window.close(); }</script>
+</body></html>`);
+    win.document.close();
+    toast.success("Relatório enviado para impressão!");
   };
+
+  const fmt = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
 
   return (
     <div className="p-8">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-[#424242] mb-2">Relatórios</h1>
-        <p className="text-[#717182]">
-          Análise de dados e exportação de relatórios
-        </p>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-[#424242] mb-1">Relatórios</h1>
+          <p className="text-[#717182]">Análise de dados e exportação de relatórios</p>
+        </div>
+        <button
+          onClick={loadData}
+          className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-[#717182]"
+          title="Atualizar dados"
+        >
+          <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
+        </button>
       </div>
 
       {/* Filters */}
@@ -65,184 +208,225 @@ export function Reports() {
           <Filter className="w-5 h-5 text-[#2E7D32]" />
           <h3 className="text-lg font-semibold text-[#424242]">Filtros</h3>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Start Date */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
-            <label className="block text-sm text-[#424242] mb-2">
-              Data Inicial
-            </label>
-            <input
-              type="date"
-              value={filters.startDate}
-              onChange={(e) =>
-                setFilters({ ...filters, startDate: e.target.value })
-              }
-              className="w-full px-4 py-2 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/20 transition-all"
-            />
+            <label className="block text-sm font-medium text-[#424242] mb-1.5">Data Inicial</label>
+            <input type="date" value={filters.startDate}
+              onChange={(e) => setFilters((f) => ({ ...f, startDate: e.target.value }))}
+              className="w-full px-4 py-2.5 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/20 transition-all text-sm" />
           </div>
-
-          {/* End Date */}
           <div>
-            <label className="block text-sm text-[#424242] mb-2">
-              Data Final
-            </label>
-            <input
-              type="date"
-              value={filters.endDate}
-              onChange={(e) =>
-                setFilters({ ...filters, endDate: e.target.value })
-              }
-              className="w-full px-4 py-2 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/20 transition-all"
-            />
+            <label className="block text-sm font-medium text-[#424242] mb-1.5">Data Final</label>
+            <input type="date" value={filters.endDate}
+              onChange={(e) => setFilters((f) => ({ ...f, endDate: e.target.value }))}
+              className="w-full px-4 py-2.5 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/20 transition-all text-sm" />
           </div>
-
-          {/* Material Type */}
           <div>
-            <label className="block text-sm text-[#424242] mb-2">
-              Tipo de Material
-            </label>
-            <select
-              value={filters.materialType}
-              onChange={(e) =>
-                setFilters({ ...filters, materialType: e.target.value })
-              }
-              className="w-full px-4 py-2 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/20 transition-all"
-            >
+            <label className="block text-sm font-medium text-[#424242] mb-1.5">Material</label>
+            <select value={filters.materialName}
+              onChange={(e) => setFilters((f) => ({ ...f, materialName: e.target.value }))}
+              className="w-full px-4 py-2.5 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/20 transition-all text-sm bg-white">
               <option value="">Todos os materiais</option>
-              <option value="aco">Aço</option>
-              <option value="aluminio">Alumínio</option>
-              <option value="cobre">Cobre</option>
-              <option value="ferro">Ferro</option>
-              <option value="inox">Inox</option>
-            </select>
-          </div>
-
-          {/* Department */}
-          <div>
-            <label className="block text-sm text-[#424242] mb-2">Setor</label>
-            <select
-              value={filters.department}
-              onChange={(e) =>
-                setFilters({ ...filters, department: e.target.value })
-              }
-              className="w-full px-4 py-2 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/20 transition-all"
-            >
-              <option value="">Todos os setores</option>
-              <option value="producao">Produção</option>
-              <option value="montagem">Montagem</option>
-              <option value="estamparia">Estamparia</option>
-              <option value="pintura">Pintura</option>
-              <option value="usinagem">Usinagem</option>
+              {materialNames.map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           </div>
         </div>
-
-        {/* Export Buttons */}
-        <div className="flex gap-3 mt-6">
-          <button
-            onClick={handleExportPDF}
-            className="bg-[#2E7D32] hover:bg-[#1B5E20] text-white px-6 py-2 rounded-lg transition-colors font-medium flex items-center gap-2"
-          >
-            <FileDown className="w-5 h-5" />
-            Exportar PDF
+        <div className="flex gap-3 mt-2">
+          <button onClick={handlePrint}
+            className="bg-[#2E7D32] hover:bg-[#1B5E20] text-white px-5 py-2.5 rounded-lg transition-colors font-medium flex items-center gap-2 text-sm">
+            <Printer className="w-4 h-4" /> Exportar PDF
           </button>
-          <button
-            onClick={handleExportExcel}
-            className="bg-[#66BB6A] hover:bg-[#4CAF50] text-white px-6 py-2 rounded-lg transition-colors font-medium flex items-center gap-2"
-          >
-            <FileDown className="w-5 h-5" />
-            Exportar Excel
+          <button onClick={handleExportCSV}
+            className="bg-[#66BB6A] hover:bg-[#4CAF50] text-white px-5 py-2.5 rounded-lg transition-colors font-medium flex items-center gap-2 text-sm">
+            <FileDown className="w-4 h-4" /> Exportar Excel / CSV
           </button>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-          <h3 className="text-sm text-[#717182] mb-1">Total Gerado</h3>
-          <p className="text-2xl font-bold text-[#424242]">9.300 kg</p>
-          <p className="text-xs text-[#66BB6A] mt-1">↑ 8% vs período anterior</p>
+      {/* KPI Cards */}
+      {loading ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="bg-white rounded-xl p-6 border border-gray-100 animate-pulse">
+              <div className="h-4 bg-gray-100 rounded w-1/2 mb-3" />
+              <div className="h-8 bg-gray-100 rounded w-3/4" />
+            </div>
+          ))}
         </div>
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-          <h3 className="text-sm text-[#717182] mb-1">Reaproveitado</h3>
-          <p className="text-2xl font-bold text-[#424242]">7.610 kg</p>
-          <p className="text-xs text-[#66BB6A] mt-1">
-            ↑ 12% vs período anterior
-          </p>
+      ) : (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="bg-[#2E7D32]/10 p-2 rounded-lg"><Package className="w-5 h-5 text-[#2E7D32]" /></div>
+            </div>
+            <p className="text-sm text-[#717182]">Total Gerado</p>
+            <p className="text-2xl font-bold text-[#424242] mt-0.5">{fmt(totalKg)} <span className="text-base font-normal text-[#717182]">kg</span></p>
+            <p className="text-xs text-[#717182] mt-1">{filtered.length} registros no período</p>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="bg-green-100 p-2 rounded-lg"><Recycle className="w-5 h-5 text-green-600" /></div>
+            </div>
+            <p className="text-sm text-[#717182]">Reaproveitado</p>
+            <p className="text-2xl font-bold text-green-600 mt-0.5">{fmt(reusedKg)} <span className="text-base font-normal text-[#717182]">kg</span></p>
+            <div className="flex items-center gap-1 mt-1">
+              <TrendingUp className="w-3 h-3 text-green-500" />
+              <p className="text-xs text-green-600">Meta ambiental alcançada</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="bg-red-100 p-2 rounded-lg"><TrendingDown className="w-5 h-5 text-red-500" /></div>
+            </div>
+            <p className="text-sm text-[#717182]">Descartado</p>
+            <p className="text-2xl font-bold text-red-500 mt-0.5">{fmt(discarded)} <span className="text-base font-normal text-[#717182]">kg</span></p>
+            <p className="text-xs text-[#717182] mt-1">Resíduos não reaproveitados</p>
+          </div>
+          <div className="bg-gradient-to-br from-[#2E7D32] to-[#66BB6A] rounded-xl shadow-sm p-6">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="bg-white/20 p-2 rounded-lg"><TrendingUp className="w-5 h-5 text-white" /></div>
+            </div>
+            <p className="text-sm text-white/80">Taxa de Reaproveitamento</p>
+            <p className="text-2xl font-bold text-white mt-0.5">{reusedRate}<span className="text-base font-normal text-white/80">%</span></p>
+            <p className="text-xs text-white/70 mt-1">Eficiência do período</p>
+          </div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-          <h3 className="text-sm text-[#717182] mb-1">Descartado</h3>
-          <p className="text-2xl font-bold text-[#424242]">1.690 kg</p>
-          <p className="text-xs text-red-500 mt-1">↑ 3% vs período anterior</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-          <h3 className="text-sm text-[#717182] mb-1">Taxa de Reaproveitamento</h3>
-          <p className="text-2xl font-bold text-[#424242]">81.8%</p>
-          <p className="text-xs text-[#66BB6A] mt-1">↑ 4% vs período anterior</p>
-        </div>
-      </div>
+      )}
 
       {/* Charts */}
-      <div className="space-y-6">
-        {/* Line Chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* Monthly line chart */}
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-          <h3 className="text-lg font-semibold text-[#424242] mb-6">
-            Evolução Mensal de Resíduos
-          </h3>
-          <ResponsiveContainer width="100%" height={350}>
-            <LineChart data={monthlyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="mes" stroke="#717182" />
-              <YAxis stroke="#717182" />
-              <Tooltip />
-              <Legend />
-              <Line
-                type="monotone"
-                dataKey="gerado"
-                stroke="#424242"
-                strokeWidth={2}
-                name="Gerado (kg)"
-              />
-              <Line
-                type="monotone"
-                dataKey="reaproveitado"
-                stroke="#2E7D32"
-                strokeWidth={2}
-                name="Reaproveitado (kg)"
-              />
-              <Line
-                type="monotone"
-                dataKey="descartado"
-                stroke="#d4183d"
-                strokeWidth={2}
-                name="Descartado (kg)"
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          <h3 className="text-lg font-semibold text-[#424242] mb-6">Evolução Mensal de Resíduos</h3>
+          {monthlyData.length === 0 ? (
+            <div className="h-64 flex items-center justify-center text-[#717182] text-sm">
+              {loading ? "Carregando..." : "Sem dados para o período selecionado."}
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={monthlyData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="mes" stroke="#717182" tick={{ fontSize: 12 }} />
+                <YAxis stroke="#717182" tick={{ fontSize: 12 }} unit=" kg" width={65} />
+                <Tooltip formatter={(v: number) => [`${fmt(v)} kg`, "Gerado"]} />
+                <Line type="monotone" dataKey="gerado" stroke="#2E7D32" strokeWidth={3}
+                  dot={{ fill: "#2E7D32", r: 5 }} activeDot={{ r: 8 }} name="Gerado (kg)" />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
-        {/* Bar Chart */}
+        {/* Pie chart */}
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-          <h3 className="text-lg font-semibold text-[#424242] mb-6">
-            Resíduos por Setor (Período Selecionado)
-          </h3>
-          <ResponsiveContainer width="100%" height={350}>
-            <BarChart data={departmentData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="setor" stroke="#717182" />
-              <YAxis stroke="#717182" />
-              <Tooltip />
-              <Legend />
-              <Bar
-                dataKey="total"
-                fill="#2E7D32"
-                name="Total (kg)"
-                radius={[8, 8, 0, 0]}
-              />
+          <h3 className="text-lg font-semibold text-[#424242] mb-6">Distribuição por Material</h3>
+          {byMaterial.length === 0 ? (
+            <div className="h-64 flex items-center justify-center text-[#717182] text-sm">
+              {loading ? "Carregando..." : "Sem dados para o período selecionado."}
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <PieChart>
+                <Pie data={byMaterial.slice(0, 8)} dataKey="total" nameKey="name"
+                  cx="50%" cy="50%" outerRadius={100}
+                  label={({ name, percent }) => percent > 0.05 ? `${name.split(" ")[0]} ${(percent * 100).toFixed(0)}%` : ""}>
+                  {byMaterial.slice(0, 8).map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(v: number) => `${fmt(v)} kg`} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* Bar chart by material */}
+      <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 mb-6">
+        <h3 className="text-lg font-semibold text-[#424242] mb-6">Total por Material (kg)</h3>
+        {byMaterial.length === 0 ? (
+          <div className="h-64 flex items-center justify-center text-[#717182] text-sm">
+            {loading ? "Carregando..." : "Sem dados para o período selecionado."}
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={byMaterial.slice(0, 10)} layout="vertical" margin={{ left: 16, right: 24 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+              <XAxis type="number" stroke="#717182" tick={{ fontSize: 11 }} unit=" kg" />
+              <YAxis type="category" dataKey="name" stroke="#717182" tick={{ fontSize: 11 }} width={130} />
+              <Tooltip formatter={(v: number) => [`${fmt(v)} kg`, "Total"]} />
+              <Bar dataKey="total" fill="#2E7D32" radius={[0, 8, 8, 0]} name="Total (kg)" />
             </BarChart>
           </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Recent records table */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <h3 className="text-lg font-semibold text-[#424242]">
+            Registros Recentes
+            <span className="ml-2 text-sm font-normal text-[#717182]">({filtered.length} no período)</span>
+          </h3>
         </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-[#F5F5F5]">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-[#424242] uppercase tracking-wide">ID</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-[#424242] uppercase tracking-wide">Material</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-[#424242] uppercase tracking-wide">Quantidade</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-[#424242] uppercase tracking-wide">Local</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-[#424242] uppercase tracking-wide">Reaprov.</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-[#424242] uppercase tracking-wide">Valor</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-[#424242] uppercase tracking-wide">Data</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i}>
+                    {Array.from({ length: 7 }).map((__, j) => (
+                      <td key={j} className="px-6 py-4"><div className="h-4 bg-gray-100 rounded animate-pulse" /></td>
+                    ))}
+                  </tr>
+                ))
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-[#717182]">
+                    Nenhum registro encontrado para os filtros selecionados.
+                  </td>
+                </tr>
+              ) : (
+                filtered.slice(0, 30).map((w) => (
+                  <tr key={w.id} className="hover:bg-[#F5F5F5]/50 transition-colors">
+                    <td className="px-6 py-3 font-mono text-xs text-[#717182]">#{w.id}</td>
+                    <td className="px-6 py-3 text-sm font-medium text-[#424242]">{w.material_name || "—"}</td>
+                    <td className="px-6 py-3 text-sm text-right text-[#424242]">
+                      {Number(w.quantity || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} kg
+                    </td>
+                    <td className="px-6 py-3 text-sm text-[#717182]">{w.location || "—"}</td>
+                    <td className="px-6 py-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${w.recovered ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
+                        {w.recovered ? "Sim" : "Não"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3 text-sm text-right text-[#424242]">
+                      R$ {Number(w.value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-6 py-3 text-sm text-[#717182]">
+                      {new Date(w.created_at).toLocaleDateString("pt-BR")}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        {filtered.length > 30 && (
+          <div className="px-6 py-3 bg-[#F5F5F5] text-xs text-[#717182] text-center border-t border-gray-100">
+            Exibindo os 30 mais recentes de {filtered.length} registros. Use os filtros para refinar ou exporte para ver todos.
+          </div>
+        )}
       </div>
     </div>
   );

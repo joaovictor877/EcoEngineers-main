@@ -1,16 +1,40 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Recycle } from "lucide-react";
+import { toast } from "sonner";
+import api from "../lib/api";
 
 export function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulação de login - redireciona para o dashboard
-    navigate("/");
+    setIsLoading(true);
+    try {
+      const { data } = await api.post<{ token: string }>("/api/login", {
+        email,
+        password,
+      });
+
+      if (!data?.token) {
+        toast.error("Resposta de login inválida");
+        return;
+      }
+
+      localStorage.setItem("token", data.token);
+      toast.success("Login realizado com sucesso");
+      navigate("/");
+    } catch (error: any) {
+      const message =
+        error?.response?.data?.error ||
+        "Falha no login. Verifique email e senha.";
+      toast.error(message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -61,9 +85,10 @@ export function Login() {
 
           <button
             type="submit"
+            disabled={isLoading}
             className="w-full bg-[#2E7D32] hover:bg-[#1B5E20] text-white py-3 rounded-lg transition-colors font-medium"
           >
-            Entrar
+            {isLoading ? "Entrando..." : "Entrar"}
           </button>
 
           <button

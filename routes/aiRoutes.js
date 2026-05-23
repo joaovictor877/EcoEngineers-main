@@ -23,17 +23,39 @@ async function salvarAnalise(dbQuery, dbClient, payload) {
   const { camera_id, material_detectado, categoria_detectada, confianca, observacao, imagem_url, sugestao_destino } = payload;
   try {
     if (dbClient === 'mysql') {
+      try {
+        const ins = await dbQuery(
+          'INSERT INTO analises_ia (camera_id, material_detectado, categoria_detectada, confianca, observacao, imagem_url, sugestao_destino) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+          [camera_id || null, material_detectado, categoria_detectada, confianca, observacao, imagem_url, sugestao_destino || null]
+        );
+        return ins.raw.insertId;
+      } catch (e) {
+        if (String(e.message || '').toLowerCase().includes('sugestao_destino')) {
+          const legacy = await dbQuery(
+            'INSERT INTO analises_ia (camera_id, material_detectado, categoria_detectada, confianca, observacao, imagem_url) VALUES ($1,$2,$3,$4,$5,$6)',
+            [camera_id || null, material_detectado, categoria_detectada, confianca, observacao, imagem_url]
+          );
+          return legacy.raw.insertId;
+        }
+        throw e;
+      }
+    }
+    try {
       const ins = await dbQuery(
-        'INSERT INTO analises_ia (camera_id, material_detectado, categoria_detectada, confianca, observacao, imagem_url, sugestao_destino) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        'INSERT INTO analises_ia (camera_id, material_detectado, categoria_detectada, confianca, observacao, imagem_url, sugestao_destino) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
         [camera_id || null, material_detectado, categoria_detectada, confianca, observacao, imagem_url, sugestao_destino || null]
       );
-      return ins.raw.insertId;
+      return ins.rows[0].id;
+    } catch (e) {
+      if (String(e.message || '').toLowerCase().includes('sugestao_destino')) {
+        const legacy = await dbQuery(
+          'INSERT INTO analises_ia (camera_id, material_detectado, categoria_detectada, confianca, observacao, imagem_url) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+          [camera_id || null, material_detectado, categoria_detectada, confianca, observacao, imagem_url]
+        );
+        return legacy.rows[0].id;
+      }
+      throw e;
     }
-    const ins = await dbQuery(
-      'INSERT INTO analises_ia (camera_id, material_detectado, categoria_detectada, confianca, observacao, imagem_url, sugestao_destino) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
-      [camera_id || null, material_detectado, categoria_detectada, confianca, observacao, imagem_url, sugestao_destino || null]
-    );
-    return ins.rows[0].id;
   } catch (e) {
     console.error('[IA] Falha ao salvar análise:', e.message);
     return null;

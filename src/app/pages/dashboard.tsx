@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { 
   TrendingUp, 
   Recycle, 
@@ -13,55 +14,64 @@ import {
   Pie,
   BarChart,
   Bar,
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
   Cell,
 } from "recharts";
 import { StatCard } from "../components/stat-card";
+import api from "../lib/api";
 
-// Mock data
-const materialTypesData = [
-  { name: "Aço", value: 450, color: "#2E7D32" },
-  { name: "Alumínio", value: 230, color: "#66BB6A" },
-  { name: "Cobre", value: 180, color: "#81C784" },
-  { name: "Ferro", value: 320, color: "#A5D6A7" },
-  { name: "Outros", value: 120, color: "#C8E6C9" },
-];
+interface DashStats {
+  total_kg: number;
+  reused_kg: number;
+  by_material: { name: string; total: number }[];
+}
 
-const wasteByDepartmentData = [
-  { setor: "Produção", residuos: 450 },
-  { setor: "Montagem", residuos: 380 },
-  { setor: "Estamparia", residuos: 290 },
-  { setor: "Pintura", residuos: 210 },
-  { setor: "Usinagem", residuos: 340 },
-];
+interface IaStats {
+  total_deteccoes: number;
+  confianca_media: number;
+  ultimo_material: string;
+  por_material: { material_detectado: string; quantidade: number }[];
+}
 
-const iaDetectionData = [
-  { material: "Cavaco Aço", deteccoes: 78 },
-  { material: "Alumínio", deteccoes: 52 },
-  { material: "Cobre", deteccoes: 34 },
-  { material: "Ferro", deteccoes: 47 },
-  { material: "Inox", deteccoes: 21 },
-  { material: "Sucata", deteccoes: 15 },
-];
+const COLORS = ["#2E7D32", "#66BB6A", "#81C784", "#A5D6A7", "#C8E6C9", "#F9A825", "#0288D1", "#7B1FA2"];
 
-const monthlyWasteData = [
-  { mes: "Set", kg: 1200 },
-  { mes: "Out", kg: 1450 },
-  { mes: "Nov", kg: 1100 },
-  { mes: "Dez", kg: 1600 },
-  { mes: "Jan", kg: 1350 },
-  { mes: "Fev", kg: 1280 },
-  { mes: "Mar", kg: 1520 },
-];
+function fmt(v: number | null | undefined) {
+  if (!v) return "0";
+  if (v >= 1000) return `${(v / 1000).toFixed(1).replace(".", ",")}t`;
+  return v.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+}
 
 export function Dashboard() {
+  const [stats, setStats] = useState<DashStats | null>(null);
+  const [iaStats, setIaStats] = useState<IaStats | null>(null);
+
+  useEffect(() => {
+    api.get<DashStats>("/api/dashboard/stats")
+      .then((r) => setStats(r.data))
+      .catch(() => {/* silently keep null */});
+    api.get<IaStats>("/api/dashboard/stats/ia")
+      .then((r) => setIaStats(r.data))
+      .catch(() => {});
+  }, []);
+
+  const totalKg  = stats?.total_kg  ?? 0;
+  const reusedKg = stats?.reused_kg ?? 0;
+  const savingsR$ = (reusedKg * 2.5).toFixed(0); // R$2.50/kg estimate
+  const reuseRate = totalKg > 0 ? ((reusedKg / totalKg) * 100).toFixed(0) : "0";
+
+  const materialPieData = (stats?.by_material ?? []).slice(0, 6).map((m, i) => ({
+    name: m.name, value: Math.round(Number(m.total)), color: COLORS[i % COLORS.length],
+  }));
+
+  const iaBarData = (iaStats?.por_material ?? []).map((m) => ({
+    material: (m.material_detectado || "?").split(" ").slice(0, 2).join(" "),
+    deteccoes: Number(m.quantidade),
+  }));
+
   return (
     <div className="p-4 lg:p-8">
       {/* Header */}
@@ -78,31 +88,31 @@ export function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-6 lg:mb-8">
         <StatCard
           title="Total de Resíduos Gerados"
-          value="8.420 kg"
+          value={`${fmt(totalKg)} kg`}
           icon={TrendingUp}
-          trend="+12%"
+          trend={totalKg > 0 ? "Período atual" : "Aguardando dados"}
           trendUp={true}
         />
         <StatCard
           title="Material Reaproveitado"
-          value="6.340 kg"
+          value={`${fmt(reusedKg)} kg`}
           icon={Recycle}
-          trend="+18%"
+          trend={reusedKg > 0 ? "Confirmado" : "Aguardando dados"}
           trendUp={true}
           iconColor="bg-[#66BB6A]/10 text-[#66BB6A]"
         />
         <StatCard
           title="Economia Gerada"
-          value="R$ 47.800"
+          value={`R$ ${Number(savingsR$).toLocaleString("pt-BR")}`}
           icon={DollarSign}
-          trend="+25%"
+          trend="Estimativa"
           trendUp={true}
         />
         <StatCard
           title="Redução de Impacto Ambiental"
-          value="75%"
+          value={`${reuseRate}%`}
           icon={Leaf}
-          trend="-15%"
+          trend="Taxa de reaproveitamento"
           trendUp={true}
           iconColor="bg-[#66BB6A]/10 text-[#66BB6A]"
         />
@@ -118,65 +128,44 @@ export function Dashboard() {
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <Pie
-                data={materialTypesData}
+                data={materialPieData.length ? materialPieData : [{ name: "Sem dados", value: 1, color: "#e0e0e0" }]}
                 cx="50%"
                 cy="50%"
                 labelLine={false}
                 label={({ name, percent }) =>
-                  `${name} ${(percent * 100).toFixed(0)}%`
+                  percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : ""
                 }
                 outerRadius={100}
                 fill="#8884d8"
                 dataKey="value"
               >
-                {materialTypesData.map((entry, index) => (
+                {(materialPieData.length ? materialPieData : [{ color: "#e0e0e0" }]).map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
-              <Tooltip />
+              <Tooltip formatter={(v: number) => `${v.toLocaleString("pt-BR")} kg`} />
             </PieChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Bar Chart - Resíduos por Setor */}
+        {/* Bar Chart - by material */}
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <h3 className="text-lg font-semibold text-[#424242] mb-6">
-            Produção de Resíduos por Setor
+            Resíduos por Material (kg)
           </h3>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={wasteByDepartmentData}>
+            <BarChart data={materialPieData.length ? materialPieData.map(m => ({ setor: m.name, residuos: m.value })) : []}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="setor" stroke="#717182" />
-              <YAxis stroke="#717182" />
-              <Tooltip />
-              <Bar dataKey="residuos" fill="#2E7D32" radius={[8, 8, 0, 0]} />
+              <XAxis dataKey="setor" stroke="#717182" tick={{ fontSize: 11 }} />
+              <YAxis stroke="#717182" tick={{ fontSize: 11 }} />
+              <Tooltip formatter={(v: number) => `${v.toLocaleString("pt-BR")} kg`} />
+              <Bar dataKey="residuos" fill="#2E7D32" radius={[8, 8, 0, 0]} name="Total (kg)" />
             </BarChart>
           </ResponsiveContainer>
+          {materialPieData.length === 0 && (
+            <p className="text-center text-sm text-[#717182] mt-4">Nenhum resíduo registrado ainda.</p>
+          )}
         </div>
-      </div>
-
-      {/* Line Chart - Geração de Resíduos por Mês */}
-      <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-        <h3 className="text-lg font-semibold text-[#424242] mb-6">
-          Geração de Resíduos por Mês
-        </h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={monthlyWasteData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis dataKey="mes" stroke="#717182" />
-            <YAxis stroke="#717182" />
-            <Tooltip />
-            <Legend />
-            <Line
-              type="monotone"
-              dataKey="kg"
-              stroke="#2E7D32"
-              strokeWidth={3}
-              dot={{ fill: "#2E7D32", r: 5 }}
-              activeDot={{ r: 8 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
       </div>
 
       {/* IA Section */}
@@ -189,33 +178,33 @@ export function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-6">
           <StatCard
             title="Total Detectado por IA"
-            value="247"
+            value={String(iaStats?.total_deteccoes ?? 0)}
             icon={Brain}
-            trend="+32%"
+            trend={iaStats ? "Detecções acumuladas" : "Aguardando dados"}
             trendUp={true}
             iconColor="bg-purple-100 text-purple-700"
           />
           <StatCard
             title="Peso Automático Total"
-            value="3.240 kg"
+            value={`${fmt(totalKg)} kg`}
             icon={Activity}
-            trend="+28%"
+            trend="Via câmera + ESP32"
             trendUp={true}
             iconColor="bg-blue-100 text-blue-700"
           />
           <StatCard
             title="Confiança Média"
-            value="88.4%"
+            value={iaStats?.confianca_media ? `${Number(iaStats.confianca_media).toFixed(1)}%` : "—"}
             icon={CheckCircle}
-            trend="+3.2%"
+            trend="Precisão do modelo"
             trendUp={true}
             iconColor="bg-green-100 text-green-700"
           />
           <StatCard
             title="Último Detectado"
-            value="Cavaco de Aço"
+            value={iaStats?.ultimo_material ?? "—"}
             icon={Cpu}
-            trend="Hoje"
+            trend="Última análise IA"
             trendUp={true}
             iconColor="bg-orange-100 text-orange-700"
           />
@@ -225,15 +214,21 @@ export function Dashboard() {
           <h3 className="text-lg font-semibold text-[#424242] mb-6">
             Detecções por Material (IA)
           </h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={iaDetectionData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="material" stroke="#717182" />
-              <YAxis stroke="#717182" />
-              <Tooltip />
-              <Bar dataKey="deteccoes" fill="#9C27B0" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {iaBarData.length === 0 ? (
+            <div className="h-[280px] flex items-center justify-center text-[#717182] text-sm">
+              Nenhuma análise de IA registrada ainda.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={iaBarData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="material" stroke="#717182" tick={{ fontSize: 11 }} />
+                <YAxis stroke="#717182" tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="deteccoes" fill="#9C27B0" radius={[8, 8, 0, 0]} name="Detecções" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
     </div>
