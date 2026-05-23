@@ -50,8 +50,16 @@ const DESTINO_LABEL: Record<string, string> = {
   venda: "Venda para Terceiros",
 };
 
+interface Material {
+  id: number;
+  name: string;
+  category: string;
+  unit: string;
+}
+
 export function RegisterWaste() {
   const [formData, setFormData] = useState({
+    material_id: "",
     materialType: "",
     category: "",
     weight: "",
@@ -60,6 +68,9 @@ export function RegisterWaste() {
     destination: "",
     observation: "",
   });
+
+  const [materialsList, setMaterialsList] = useState<Material[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [hwStatus, setHwStatus] = useState<HWStatus>({
     esp32: "desconectado",
@@ -107,13 +118,28 @@ export function RegisterWaste() {
     return () => { socketRef.current?.disconnect(); };
   }, []);
 
+  // Load materials list
+  useEffect(() => {
+    api.get<Material[]>("/api/materials")
+      .then((r) => setMaterialsList(r.data))
+      .catch(() => toast.error("Falha ao carregar lista de materiais"));
+  }, []);
+
   function applyAIResult(data: AIResult) {
     setAiResult(data);
     setIsAnalyzing(false);
     setIsDetectedByAI(true);
     const destLabel = DESTINO_LABEL[data.sugestao_destino] ? data.sugestao_destino : "";
+    // Try to match AI detected material name to one in the list
+    const aiName = (data.material_detectado || "").toLowerCase();
+    const match = materialsList.find(
+      (m) => m.name.toLowerCase() === aiName ||
+             m.name.toLowerCase().includes(aiName) ||
+             aiName.includes(m.name.toLowerCase())
+    );
     setFormData((prev) => ({
       ...prev,
+      material_id: match ? String(match.id) : "",
       materialType: data.material_detectado,
       category: data.categoria_detectada,
       destination: destLabel || prev.destination,
@@ -181,17 +207,36 @@ export function RegisterWaste() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast.success("✅ Material registrado com sucesso!");
-    setFormData({
-      materialType: "", category: "", weight: "",
-      department: "", date: new Date().toISOString().split("T")[0],
-      destination: "", observation: "",
-    });
-    setAiResult(null);
-    setIsDetectedByAI(false);
-    setCapturedImage(null);
+    if (!formData.material_id) { toast.error("Selecione o tipo de material"); return; }
+    if (!formData.weight || Number(formData.weight) <= 0) { toast.error("Informe o peso corretamente"); return; }
+    if (!formData.department) { toast.error("Selecione o setor de origem"); return; }
+    if (!formData.destination) { toast.error("Selecione o destino"); return; }
+    setIsSubmitting(true);
+    try {
+      await api.post("/api/residuos", {
+        material_id: Number(formData.material_id),
+        peso: Number(formData.weight),
+        setor_origem: formData.department,
+        destino: formData.destination,
+        observacao: formData.observation,
+        analise_ia_id: aiResult?.analise_id || null,
+      });
+      toast.success("✅ Resíduo registrado com sucesso!");
+      setFormData({
+        material_id: "", materialType: "", category: "", weight: "",
+        department: "", date: new Date().toISOString().split("T")[0],
+        destination: "", observation: "",
+      });
+      setAiResult(null);
+      setIsDetectedByAI(false);
+      setCapturedImage(null);
+    } catch (error: unknown) {
+      toast.error(getApiErrorMessage(error, "Falha ao registrar resíduo"));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const inputClass = (highlighted = false) =>
@@ -256,10 +301,10 @@ export function RegisterWaste() {
             <div className="aspect-video bg-gray-900 flex items-center justify-center overflow-hidden">
               {cameraActive ? (
                 <img
-                  src={`${cameraUrl}/video`}
+                  src={`/api/cameras/proxy-stream?url=${encodeURIComponent(`${cameraUrl}/video`)}`}
                   alt="Camera feed"
                   className="w-full h-full object-cover"
-                  onError={() => { setCameraActive(false); toast.error("Falha na câmera"); }}
+                  onError={() => { setCameraActive(false); toast.error("Câmera inacessível. Verifique se ela está na mesma rede que o servidor."); }}
                 />
               ) : capturedImage ? (
                 <img src={capturedImage} alt="Captura IA" className="w-full h-full object-cover" />
@@ -371,7 +416,28 @@ export function RegisterWaste() {
                     Tipo de Material
                     {isDetectedByAI && <span className="ml-2 text-xs bg-[#2E7D32] text-white px-1.5 py-0.5 rounded font-normal">IA</span>}
                   </label>
-                  <input type="text" value={formData.materialType} onChange={(e) => setFormData({ ...formData, materialType: e.target.value })} className={inputClass(isDetectedByAI)} placeholder="Ex: Cavaco de Alumínio" required />
+                  <select
+                    value={formData.material_id}
+                    onChange={(e) => {
+                      const mat = materialsList.find((m) => String(m.id) === e.target.value);
+                      setFormData((prev) => ({
+                        ...prev,
+                        material_id: e.target.value,
+                        materialType: mat?.name || "",
+                        category: mat?.category || prev.category,
+                      }));
+                    }}
+                    className={inputClass(isDetectedByAI)}
+                    required
+                  >
+                    <option value="">Selecione o material</option>
+                    {materialsList.map((m) => (
+                      <option key={m.id} value={String(m.id)}>{m.name}</option>
+                    ))}
+                  </select>
+                  {isDetectedByAI && !formData.material_id && (
+                    <p className="text-xs text-amber-600 mt-1">⚠️ IA detectou "{formData.materialType}" — selecione o material equivalente acima</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-[#424242] mb-2">
@@ -431,8 +497,12 @@ export function RegisterWaste() {
                 <textarea value={formData.observation} onChange={(e) => setFormData({ ...formData, observation: e.target.value })} className={`${inputClass(isDetectedByAI)} resize-none`} rows={3} placeholder="Observações adicionais sobre o material..." />
               </div>
 
-              <button type="submit" className="w-full bg-[#2E7D32] hover:bg-[#1B5E20] text-white py-3.5 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 text-base">
-                <Save className="w-5 h-5" /> Registrar Material
+              <button type="submit" disabled={isSubmitting} className="w-full bg-[#2E7D32] hover:bg-[#1B5E20] text-white py-3.5 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 text-base disabled:opacity-60 disabled:cursor-not-allowed">
+                {isSubmitting ? (
+                  <><RefreshCw className="w-5 h-5 animate-spin" /> Registrando...</>
+                ) : (
+                  <><Save className="w-5 h-5" /> Registrar Material</>
+                )}
               </button>
             </form>
           </div>

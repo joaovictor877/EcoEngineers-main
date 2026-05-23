@@ -289,6 +289,64 @@ app.get('/api/dashboard/stats/ia', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/residuos — registro principal (registros_residuos + wastes)
+app.post('/api/residuos', authMiddleware, async (req, res) => {
+  try {
+    const { material_id, peso, setor_origem, destino, observacao, analise_ia_id } = req.body;
+    if (!material_id) return res.status(400).json({ error: 'material_id é obrigatório' });
+    if (!peso || Number(peso) <= 0) return res.status(400).json({ error: 'peso deve ser maior que zero' });
+
+    const recovered = ['reaproveitamento', 'reciclagem', 'venda'].includes(destino) ? 1 : 0;
+    const statusMap = { reaproveitamento: 'reaproveitamento', reciclagem: 'reaproveitamento', venda: 'reaproveitamento', descarte: 'descarte' };
+    const rrStatus = statusMap[destino] || 'producao';
+
+    if (dbClient === 'mysql') {
+      const rrInsert = await dbQuery(
+        'INSERT INTO registros_residuos (material_id, usuario_id, analise_ia_id, peso, setor_origem, destino, status, observacao) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+        [material_id, req.user.id, analise_ia_id || null, peso, setor_origem || '', destino || '', rrStatus, observacao || '']
+      );
+      await dbQuery(
+        'INSERT INTO wastes (user_id, material_id, quantity, location, recovered, value) VALUES ($1,$2,$3,$4,$5,$6)',
+        [req.user.id, material_id, peso, setor_origem || '', recovered, 0]
+      );
+      const row = await dbQuery(
+        'SELECT rr.*, m.name as material_name, m.category as material_category FROM registros_residuos rr LEFT JOIN materials m ON rr.material_id = m.id WHERE rr.id = $1',
+        [rrInsert.raw.insertId]
+      );
+      return res.json(row.rows[0]);
+    }
+    const rr = await dbQuery(
+      'INSERT INTO registros_residuos (material_id, usuario_id, analise_ia_id, peso, setor_origem, destino, status, observacao) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [material_id, req.user.id, analise_ia_id || null, peso, setor_origem || '', destino || '', rrStatus, observacao || '']
+    );
+    await dbQuery(
+      'INSERT INTO wastes (user_id, material_id, quantity, location, recovered, value) VALUES ($1,$2,$3,$4,$5,$6)',
+      [req.user.id, material_id, peso, setor_origem || '', recovered, 0]
+    );
+    res.json(rr.rows[0]);
+  } catch (err) {
+    console.error('[POST /api/residuos]', err);
+    res.status(500).json({ error: 'Falha ao registrar resíduo: ' + err.message });
+  }
+});
+
+// GET /api/residuos — listagem com joins
+app.get('/api/residuos', authMiddleware, async (req, res) => {
+  try {
+    const r = await dbQuery(
+      `SELECT rr.*, m.name as material_name, m.category as material_category, u.name as user_name
+       FROM registros_residuos rr
+       LEFT JOIN materials m ON rr.material_id = m.id
+       LEFT JOIN users u ON rr.usuario_id = u.id
+       ORDER BY rr.criado_em DESC`
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[GET /api/residuos]', err);
+    res.status(500).json({ error: 'Falha ao buscar resíduos' });
+  }
+});
+
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });

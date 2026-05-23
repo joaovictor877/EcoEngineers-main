@@ -63,5 +63,42 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
     }
   });
 
+  // ─────────────────────────────────────────────────────────
+  // GET /api/cameras/proxy-stream?url=<encoded camera url>
+  // Proxies the camera stream through HTTPS to avoid Mixed
+  // Content errors when the frontend is served over HTTPS.
+  // The camera must be reachable from the backend server.
+  // ─────────────────────────────────────────────────────────
+  router.get('/proxy-stream', authMiddleware, async (req, res) => {
+    const rawUrl = req.query.url;
+    if (!rawUrl) return res.status(400).json({ error: 'Parâmetro url é obrigatório' });
+
+    let parsed;
+    try { parsed = new URL(rawUrl); } catch { return res.status(400).json({ error: 'URL inválida' }); }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return res.status(400).json({ error: 'Apenas URLs http/https são permitidas' });
+    }
+
+    const ctrl = new AbortController();
+    // 6 s timeout to establish connection; after that stream until client closes
+    const connectTimeout = setTimeout(() => ctrl.abort(new Error('timeout de conexão')), 6000);
+    req.on('close', () => ctrl.abort());
+
+    try {
+      const upstream = await fetch(rawUrl, { signal: ctrl.signal });
+      clearTimeout(connectTimeout);
+      const ct = upstream.headers.get('content-type') || 'multipart/x-mixed-replace; boundary=frame';
+      res.setHeader('Content-Type', ct);
+      res.setHeader('Cache-Control', 'no-store');
+      const { Readable } = require('stream');
+      Readable.fromWeb(upstream.body).pipe(res);
+    } catch (err) {
+      clearTimeout(connectTimeout);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Câmera inacessível a partir do servidor. Verifique se a câmera está na mesma rede que o servidor backend.' });
+      }
+    }
+  });
+
   return router;
 };

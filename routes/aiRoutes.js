@@ -105,6 +105,12 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
       return res.json(payload);
     } catch (err) {
       console.error('[IA] Erro /capturar-camera:', err.message);
+      const unreachable = ['fetch failed', 'ECONNREFUSED', 'ETIMEDOUT', 'timeout', 'ENETUNREACH'].some(k =>
+        (err.message || '').toLowerCase().includes(k.toLowerCase())
+      );
+      if (unreachable) {
+        return res.status(502).json({ error: 'Câmera inacessível a partir do servidor. A câmera deve estar na mesma rede que o backend (não funciona para câmeras locais quando o backend está no Azure).' });
+      }
       return res.status(500).json({ error: err.message });
     }
   });
