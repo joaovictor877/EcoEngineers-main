@@ -134,18 +134,32 @@ app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
-      return res.status(400).json({ error: 'email and password are required' });
+      return res.status(400).json({ error: 'email e senha são obrigatórios' });
     }
     const r = await dbQuery('SELECT * FROM users WHERE email = $1', [email]);
     const user = r.rows[0];
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!user) {
+      return res.status(401).json({
+        error: 'Não encontramos uma conta com este email.',
+        code: 'EMAIL_NOT_FOUND',
+      });
+    }
     const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, jwtSecret, { expiresIn: '8h' });
+    if (!ok) {
+      return res.status(401).json({
+        error: 'Senha incorreta. Verifique e tente novamente.',
+        code: 'WRONG_PASSWORD',
+      });
+    }
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role, nome: user.name, cargo: user.cargo || '', setor: user.setor || '' },
+      jwtSecret,
+      { expiresIn: '8h' }
+    );
     res.json({ token });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Login failed' });
+    res.status(500).json({ error: 'Falha no servidor. Tente novamente.' });
   }
 });
 
@@ -310,7 +324,6 @@ app.post('/api/residuos', authMiddleware, async (req, res) => {
         const iaCheck = await dbQuery('SELECT id FROM analises_ia WHERE id = $1', [analise_ia_id]);
         if (!iaCheck.rows || !iaCheck.rows.length) analise_ia_id = null;
       } catch (_) {
-        // analises_ia table might not exist yet, safe to ignore
         analise_ia_id = null;
       }
     }
@@ -319,15 +332,34 @@ app.post('/api/residuos', authMiddleware, async (req, res) => {
     const statusMap = { reaproveitamento: 'reaproveitamento', reciclagem: 'reaproveitamento', venda: 'reaproveitamento', descarte: 'descarte' };
     const rrStatus = statusMap[destino] || 'producao';
 
+    // Helper: insert into registros_residuos with a given usuario_id (null-safe)
+    const insertRR = (uid) => dbQuery(
+      'INSERT INTO registros_residuos (material_id, usuario_id, analise_ia_id, peso, setor_origem, destino, status, observacao) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+      [material_id, uid, analise_ia_id || null, peso, setor_origem || '', destino || '', rrStatus, observacao || '']
+    );
+
     if (dbClient === 'mysql') {
-      const rrInsert = await dbQuery(
-        'INSERT INTO registros_residuos (material_id, usuario_id, analise_ia_id, peso, setor_origem, destino, status, observacao) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
-        [material_id, req.user.id, analise_ia_id || null, peso, setor_origem || '', destino || '', rrStatus, observacao || '']
-      );
-      await dbQuery(
-        'INSERT INTO wastes (user_id, material_id, quantity, location, recovered, value) VALUES ($1,$2,$3,$4,$5,$6)',
-        [req.user.id, material_id, peso, setor_origem || '', recovered, 0]
-      );
+      let rrInsert;
+      try {
+        rrInsert = await insertRR(req.user.id);
+      } catch (fkErr) {
+        // errno 1216/1452 = FK constraint failure on usuario_id (live DB may still FK to usuarios table)
+        // Retry with usuario_id = NULL so the record is still saved
+        if (fkErr.errno === 1216 || fkErr.errno === 1452) {
+          rrInsert = await insertRR(null);
+        } else {
+          throw fkErr;
+        }
+      }
+
+      // wastes is a legacy table — failure must not block the main response
+      try {
+        await dbQuery(
+          'INSERT INTO wastes (user_id, material_id, quantity, location, recovered, value) VALUES ($1,$2,$3,$4,$5,$6)',
+          [req.user.id, material_id, peso, setor_origem || '', recovered, 0]
+        );
+      } catch (_) { /* non-critical */ }
+
       const row = await dbQuery(
         'SELECT rr.*, m.name as material_name, m.category as material_category FROM registros_residuos rr LEFT JOIN materials m ON rr.material_id = m.id WHERE rr.id = $1',
         [rrInsert.raw.insertId]
@@ -363,6 +395,135 @@ app.get('/api/residuos', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('[GET /api/residuos]', err);
     res.status(500).json({ error: 'Falha ao buscar resíduos' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// GET /api/reports/export/csv  — filtered residuos as CSV
+// GET /api/reports/export/excel — filtered residuos as xlsx
+// Query params: startDate (YYYY-MM-DD), endDate, material
+// ─────────────────────────────────────────────────────────
+function buildResiduosQuery(params) {
+  const { startDate, endDate, material } = params;
+  let sql = `
+    SELECT rr.id,
+           COALESCE(m.name,'—')     AS material_name,
+           COALESCE(m.category,'—') AS material_category,
+           rr.peso,
+           COALESCE(rr.setor_origem,'—') AS setor_origem,
+           COALESCE(rr.destino,'—')      AS destino,
+           COALESCE(rr.status,'—')       AS status,
+           CASE WHEN rr.analise_ia_id IS NOT NULL THEN 'Sim' ELSE 'Não' END AS detectado_ia,
+           COALESCE(ai.confianca,'')     AS confianca_ia,
+           rr.criado_em,
+           COALESCE(rr.observacao,'')   AS observacao,
+           COALESCE(u.name,'—')          AS usuario
+    FROM registros_residuos rr
+    LEFT JOIN materials m  ON rr.material_id  = m.id
+    LEFT JOIN users u      ON rr.usuario_id   = u.id
+    LEFT JOIN analises_ia ai ON rr.analise_ia_id = ai.id
+    WHERE 1=1`;
+  const values = [];
+  if (startDate) { sql += ' AND DATE(rr.criado_em) >= ?'; values.push(startDate); }
+  if (endDate)   { sql += ' AND DATE(rr.criado_em) <= ?'; values.push(endDate); }
+  if (material)  { sql += ' AND m.name = ?'; values.push(material); }
+  sql += ' ORDER BY rr.criado_em DESC';
+  return { sql, values };
+}
+
+app.get('/api/reports/export/csv', authMiddleware, async (req, res) => {
+  try {
+    const { sql, values } = buildResiduosQuery(req.query);
+    const r = await dbQuery(sql, values);
+    const rows = r.rows;
+
+    const HEADER = ['ID','Material','Categoria','Peso (kg)','Setor de Origem','Destino',
+                    'Status','Detectado por IA','Confiança IA (%)','Data','Observação','Usuário'];
+    const csvRows = rows.map((row) => [
+      row.id, row.material_name, row.material_category, row.peso,
+      row.setor_origem, row.destino, row.status, row.detectado_ia, row.confianca_ia,
+      row.criado_em ? new Date(row.criado_em).toLocaleDateString('pt-BR') : '',
+      row.observacao, row.usuario,
+    ].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';'));
+
+    const csv = '\uFEFF' + [HEADER.join(';'), ...csvRows].join('\r\n');
+    const filename = `ecoengineers-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8;');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (err) {
+    console.error('[GET /api/reports/export/csv]', err.message);
+    res.status(500).json({ error: 'Falha ao exportar CSV' });
+  }
+});
+
+app.get('/api/reports/export/excel', authMiddleware, async (req, res) => {
+  let ExcelJS;
+  try { ExcelJS = require('exceljs'); } catch {
+    return res.status(503).json({ error: 'Execute: npm install exceljs' });
+  }
+  try {
+    const { sql, values } = buildResiduosQuery(req.query);
+    const r = await dbQuery(sql, values);
+    const rows = r.rows;
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'EcoEngineers';
+    const ws = wb.addWorksheet('Resíduos', { views: [{ state: 'frozen', ySplit: 1 }] });
+
+    ws.columns = [
+      { header: 'ID',              key: 'id',          width: 8  },
+      { header: 'Material',        key: 'mat',         width: 22 },
+      { header: 'Categoria',       key: 'cat',         width: 20 },
+      { header: 'Peso (kg)',       key: 'peso',        width: 12 },
+      { header: 'Setor de Origem', key: 'setor',       width: 20 },
+      { header: 'Destino',         key: 'destino',     width: 22 },
+      { header: 'Status',          key: 'status',      width: 18 },
+      { header: 'Detectado por IA',key: 'ia',          width: 16 },
+      { header: 'Confiança IA (%)',key: 'conf',        width: 16 },
+      { header: 'Data',            key: 'data',        width: 14 },
+      { header: 'Observação',      key: 'obs',         width: 30 },
+      { header: 'Usuário',         key: 'usuario',     width: 20 },
+    ];
+
+    // Style header row
+    ws.getRow(1).eachCell((cell) => {
+      cell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E7D32' } };
+      cell.font   = { color: { argb: 'FFFFFFFF' }, bold: true, size: 11 };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+    ws.getRow(1).height = 22;
+
+    rows.forEach((row, idx) => {
+      ws.addRow({
+        id:      row.id,
+        mat:     row.material_name,
+        cat:     row.material_category,
+        peso:    parseFloat(row.peso) || 0,
+        setor:   row.setor_origem,
+        destino: row.destino,
+        status:  row.status,
+        ia:      row.detectado_ia,
+        conf:    row.confianca_ia !== '' ? parseFloat(row.confianca_ia) : '',
+        data:    row.criado_em ? new Date(row.criado_em).toLocaleDateString('pt-BR') : '',
+        obs:     row.observacao,
+        usuario: row.usuario,
+      });
+      if (idx % 2 === 1) {
+        ws.getRow(idx + 2).eachCell((cell) => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+        });
+      }
+    });
+
+    const filename = `ecoengineers-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    await wb.xlsx.write(res);
+    // Note: wb.xlsx.write() ends the stream internally — do NOT call res.end() again
+  } catch (err) {
+    console.error('[GET /api/reports/export/excel]', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Falha ao gerar Excel' });
   }
 });
 

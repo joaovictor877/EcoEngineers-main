@@ -113,26 +113,25 @@ async function analisarMaterial(file) {
  * @param {string} cameraUrl - URL base da câmera (ex: http://192.168.1.120:8080)
  */
 async function capturarFrameCamera(cameraUrl) {
-  const snapshotUrl = cameraUrl.replace(/\/+$/, '') + '/shot.jpg';
+  const base = cameraUrl.replace(/\/+$/, '');
+  // Try photo.jpg (IP Webcam for Android), fall back to shot.jpg
+  const candidates = [`${base}/photo.jpg`, `${base}/shot.jpg`];
   const uploadsDir = path.join(__dirname, '..', 'uploads');
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
-  const resp = await fetch(snapshotUrl, { signal: AbortSignal.timeout(6000) });
-  if (!resp.ok) throw new Error(`Câmera retornou HTTP ${resp.status}`);
-
-  const buffer = Buffer.from(await resp.arrayBuffer());
-  const filename = `cam_${Date.now()}.jpg`;
-  const filepath = path.join(uploadsDir, filename);
-  fs.writeFileSync(filepath, buffer);
-
-  return {
-    fieldname:    'imagem',
-    originalname: filename,
-    filename,
-    path:         filepath,
-    mimetype:     'image/jpeg',
-    size:         buffer.length,
-  };
+  let lastErr;
+  for (const snapshotUrl of candidates) {
+    try {
+      const resp = await fetch(snapshotUrl, { signal: AbortSignal.timeout(6000) });
+      if (!resp.ok) { lastErr = new Error(`HTTP ${resp.status} from ${snapshotUrl}`); continue; }
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      const filename = `cam_${Date.now()}.jpg`;
+      const filepath = path.join(uploadsDir, filename);
+      fs.writeFileSync(filepath, buffer);
+      return { fieldname: 'imagem', originalname: filename, filename, path: filepath, mimetype: 'image/jpeg', size: buffer.length };
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('Câmera inacessível');
 }
 
 module.exports = { analisarMaterial, capturarFrameCamera };

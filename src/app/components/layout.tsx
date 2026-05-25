@@ -1,29 +1,33 @@
 import { Outlet, NavLink } from "react-router-dom";
-import { 
-  LayoutDashboard, 
-  FileInput, 
-  Route, 
-  Package, 
-  FileText, 
+import {
+  LayoutDashboard,
+  FileInput,
+  Route,
+  Package,
+  FileText,
   Settings,
   Recycle,
   Menu,
-  X
+  X,
 } from "lucide-react";
-import { PageHeader } from "./page-header";
 import { useState } from "react";
+import { useCurrentUser, canAccess } from "../lib/useCurrentUser";
+import { PageHeader } from "./page-header";
+
+const ALL_NAV = [
+  { path: "/",               label: "Dashboard",           icon: LayoutDashboard },
+  { path: "/register-waste", label: "Registrar Resíduo",   icon: FileInput       },
+  { path: "/tracking",       label: "Rastreamento",        icon: Route           },
+  { path: "/materials",      label: "Gestão de Materiais", icon: Package         },
+  { path: "/reports",        label: "Relatórios",          icon: FileText        },
+  { path: "/settings",       label: "Configurações",       icon: Settings        },
+];
 
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  
-  const navItems = [
-    { path: "/", label: "Dashboard", icon: LayoutDashboard },
-    { path: "/register-waste", label: "Registrar Resíduo", icon: FileInput },
-    { path: "/tracking", label: "Rastreamento de Material", icon: Route },
-    { path: "/materials", label: "Gestão de Materiais", icon: Package },
-    { path: "/reports", label: "Relatórios", icon: FileText },
-    { path: "/settings", label: "Configurações", icon: Settings },
-  ];
+  const user = useCurrentUser();
+
+  const navItems = ALL_NAV.filter((item) => canAccess(user?.role, item.path));
 
   return (
     <div className="flex h-screen bg-[#F5F5F5]">
@@ -44,9 +48,11 @@ export function Layout() {
       )}
 
       {/* Sidebar */}
-      <aside className={`w-64 bg-[#2E7D32] text-white flex flex-col fixed lg:static inset-y-0 left-0 z-40 transform transition-transform duration-300 ${
-        sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
-      }`}>
+      <aside
+        className={`w-64 bg-[#2E7D32] text-white flex flex-col fixed lg:static inset-y-0 left-0 z-40 transform transition-transform duration-300 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        }`}
+      >
         {/* Logo */}
         <div className="p-6 border-b border-[#1B5E20]">
           <div className="flex items-center gap-3">
@@ -61,7 +67,7 @@ export function Layout() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4">
+        <nav className="flex-1 p-4 overflow-y-auto">
           <ul className="space-y-1">
             {navItems.map((item) => (
               <li key={item.path}>
@@ -87,9 +93,7 @@ export function Layout() {
 
         {/* Footer */}
         <div className="p-4 border-t border-[#1B5E20]">
-          <div className="text-xs text-[#A5D6A7] text-center">
-            © 2026 EcoEngineers
-          </div>
+          <p className="text-[10px] text-[#A5D6A7] text-center">© 2026 EcoEngineers</p>
         </div>
       </aside>
 

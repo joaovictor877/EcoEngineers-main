@@ -83,6 +83,7 @@ export function RegisterWaste() {
     import.meta.env.VITE_CAMERA_URL || "https://camera.joaovictor.app.br"
   );
   const [cameraActive, setCameraActive] = useState(false);
+  const [liveFrameSrc, setLiveFrameSrc] = useState("");
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<AIResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -117,6 +118,22 @@ export function RegisterWaste() {
 
     return () => { socketRef.current?.disconnect(); };
   }, []);
+
+  // ── Camera snapshot polling (avoids MJPEG stream issues w/ Cloudflare) ──
+  useEffect(() => {
+    if (!cameraActive) { setLiveFrameSrc(""); return; }
+    const base = cameraUrl.replace(/\/+$/, "");
+    // HTTPS cameras: fetch directly (Cloudflare doesn't support MJPEG)
+    // HTTP cameras: route through backend proxy to avoid Mixed Content
+    const makeSrc = () => {
+      const t = Date.now();
+      if (base.startsWith("https://")) return `${base}/photo.jpg?t=${t}`;
+      return `/api/cameras/proxy-stream?url=${encodeURIComponent(`${base}/photo.jpg`)}&t=${t}`;
+    };
+    setLiveFrameSrc(makeSrc());
+    const id = setInterval(() => setLiveFrameSrc(makeSrc()), 1500);
+    return () => clearInterval(id);
+  }, [cameraActive, cameraUrl]);
 
   // Load materials list
   useEffect(() => {
@@ -301,11 +318,7 @@ export function RegisterWaste() {
             <div className="aspect-video bg-gray-900 flex items-center justify-center overflow-hidden">
               {cameraActive ? (
                 <img
-                  src={
-                    cameraUrl.startsWith("https://")
-                      ? `${cameraUrl}/video`
-                      : `/api/cameras/proxy-stream?url=${encodeURIComponent(`${cameraUrl}/video`)}`
-                  }
+                  src={liveFrameSrc}
                   alt="Camera feed"
                   className="w-full h-full object-cover"
                   onError={() => { setCameraActive(false); toast.error("Câmera inacessível. Verifique a URL."); }}

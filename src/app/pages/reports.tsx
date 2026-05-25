@@ -105,28 +105,54 @@ export function Reports() {
     [wastes]
   );
 
-  /* ── CSV export ── */
-  const handleExportCSV = () => {
-    if (filtered.length === 0) { toast.error("Nenhum dado para exportar"); return; }
-    const header = ["ID", "Material", "Quantidade (kg)", "Local", "Reaproveitado", "Valor (R$)", "Data"];
-    const rows = filtered.map((w) => [
-      w.id,
-      w.material_name || "",
-      w.quantity,
-      w.location || "",
-      w.recovered ? "Sim" : "Não",
-      w.value || 0,
-      new Date(w.created_at).toLocaleDateString("pt-BR"),
-    ]);
-    const csv = [header, ...rows].map((r) => r.join(";")).join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `ecoengineers-residuos-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Arquivo CSV exportado com sucesso!");
+  /* ── CSV export (via backend — richer data from registros_residuos) ── */
+  const handleExportCSV = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.startDate)    params.set('startDate', filters.startDate);
+      if (filters.endDate)      params.set('endDate',   filters.endDate);
+      if (filters.materialName) params.set('material',  filters.materialName);
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch(`/api/reports/export/csv?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ecoengineers-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Arquivo CSV exportado com sucesso!');
+    } catch (err: any) {
+      toast.error('Falha ao exportar CSV: ' + (err?.message || err));
+    }
+  };
+
+  /* ── Excel export (via backend) ── */
+  const handleExportExcel = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.startDate)    params.set('startDate', filters.startDate);
+      if (filters.endDate)      params.set('endDate',   filters.endDate);
+      if (filters.materialName) params.set('material',  filters.materialName);
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch(`/api/reports/export/excel?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ecoengineers-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Planilha Excel exportada com sucesso!');
+    } catch (err: any) {
+      toast.error('Falha ao exportar Excel: ' + (err?.message || err));
+    }
   };
 
   /* ── PDF print ── */
@@ -231,14 +257,18 @@ export function Reports() {
             </select>
           </div>
         </div>
-        <div className="flex gap-3 mt-2">
+        <div className="flex flex-wrap gap-3 mt-2">
           <button onClick={handlePrint}
             className="bg-[#2E7D32] hover:bg-[#1B5E20] text-white px-5 py-2.5 rounded-lg transition-colors font-medium flex items-center gap-2 text-sm">
             <Printer className="w-4 h-4" /> Exportar PDF
           </button>
           <button onClick={handleExportCSV}
             className="bg-[#66BB6A] hover:bg-[#4CAF50] text-white px-5 py-2.5 rounded-lg transition-colors font-medium flex items-center gap-2 text-sm">
-            <FileDown className="w-4 h-4" /> Exportar Excel / CSV
+            <FileDown className="w-4 h-4" /> Exportar CSV
+          </button>
+          <button onClick={handleExportExcel}
+            className="bg-[#0288D1] hover:bg-[#0277BD] text-white px-5 py-2.5 rounded-lg transition-colors font-medium flex items-center gap-2 text-sm">
+            <FileDown className="w-4 h-4" /> Exportar Excel
           </button>
         </div>
       </div>

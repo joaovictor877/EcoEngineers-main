@@ -28,8 +28,8 @@ const getStatusColor = (status: string) => {
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  producao: "ProduÃ§Ã£o",
-  separacao: "SeparaÃ§Ã£o",
+  producao: "Produção",
+  separacao: "Separação",
   armazenamento: "Armazenamento",
   reaproveitamento: "Reaproveitamento",
   descarte: "Descarte",
@@ -70,7 +70,7 @@ export function TrackingMaterial() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-[#424242] mb-1">Rastreamento de Material</h1>
-          <p className="text-[#717182]">Visualize o fluxo da logÃ­stica reversa</p>
+          <p className="text-[#717182]">Visualize o fluxo da logística reversa</p>
         </div>
         <button
           onClick={loadData}
@@ -116,13 +116,13 @@ export function TrackingMaterial() {
 
       {/* Flow Diagram */}
       <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100 mb-8">
-        <h3 className="text-lg font-semibold text-[#424242] mb-6">Fluxo da LogÃ­stica Reversa</h3>
+        <h3 className="text-lg font-semibold text-[#424242] mb-6">Fluxo da Logística Reversa</h3>
         <div className="flex items-center justify-between">
           {[
-            { icon: Factory,   label: "ProduÃ§Ã£o",        sub: "GeraÃ§Ã£o de resÃ­duos",    count: residuos.filter(r=>r.status==="producao").length },
-            { icon: Package,   label: "SeparaÃ§Ã£o",       sub: "ClassificaÃ§Ã£o por tipo",  count: residuos.filter(r=>r.status==="separacao").length },
-            { icon: Warehouse, label: "Armazenamento",   sub: "Estoque temporÃ¡rio",      count: residuos.filter(r=>r.status==="armazenamento").length },
-            { icon: Recycle,   label: "Reaproveitamento",sub: "ou Descarte",             count: reaproveitados },
+            { icon: Factory,   label: "Produção",        sub: "Geração de resíduos",   count: residuos.filter(r=>r.status==="producao").length },
+            { icon: Package,   label: "Separação",       sub: "Classificação por tipo", count: residuos.filter(r=>r.status==="separacao").length },
+            { icon: Warehouse, label: "Armazenamento",   sub: "Estoque temporário",     count: residuos.filter(r=>r.status==="armazenamento").length },
+            { icon: Recycle,   label: "Reaproveitamento",sub: "ou Descarte",            count: reaproveitados },
           ].map(({ icon: Icon, label, sub, count }, i, arr) => (
             <div key={label} className="flex items-center flex-1">
               <div className="flex flex-col items-center text-center flex-1">
@@ -177,7 +177,7 @@ export function TrackingMaterial() {
               ) : residuos.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="text-center py-12 text-[#717182]">
-                    Nenhum resÃ­duo registrado ainda. Use a pÃ¡gina "Registro de ResÃ­duos" para comeÃ§ar.
+                    Nenhum resíduo registrado ainda. Use a página “Registro de Resíduos” para começar.
                   </td>
                 </tr>
               ) : (
@@ -188,7 +188,7 @@ export function TrackingMaterial() {
                     </td>
                     <td className="px-6 py-4">
                       <div>
-                        <p className="text-sm font-semibold text-[#424242]">{r.material_name || "â€”"}</p>
+                        <p className="text-sm font-semibold text-[#424242]">{r.material_name || "—"}</p>
                         {r.material_category && (
                           <p className="text-xs text-[#717182]">{r.material_category}</p>
                         )}
@@ -200,7 +200,7 @@ export function TrackingMaterial() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-sm text-[#424242] capitalize">{r.setor_origem || "â€”"}</span>
+                      <span className="text-sm text-[#424242] capitalize">{r.setor_origem || "—"}</span>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(r.status)}`}>
@@ -209,7 +209,7 @@ export function TrackingMaterial() {
                     </td>
                     <td className="px-6 py-4">
                       <span className="text-sm text-[#424242]">
-                        {DESTINO_LABEL[r.destino] || r.destino || "â€”"}
+                        {DESTINO_LABEL[r.destino] || r.destino || "—"}
                       </span>
                     </td>
                     <td className="px-6 py-4">
@@ -223,7 +223,7 @@ export function TrackingMaterial() {
                     </td>
                     <td className="px-6 py-4">
                       <span className="text-sm text-[#717182]">
-                        {r.criado_em ? new Date(r.criado_em).toLocaleDateString("pt-BR") : "â€”"}
+                        {r.criado_em ? new Date(r.criado_em).toLocaleDateString("pt-BR") : "—"}
                       </span>
                     </td>
                   </tr>
