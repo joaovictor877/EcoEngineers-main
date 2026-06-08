@@ -79,4 +79,16 @@ Para responder mais rapido, use uma janela menor:
 5. O campo `Peso (kg)` deve preencher automaticamente.
 
 Se o valor ficar negativo, inverta o sinal de `CALIBRATION_FACTOR` no `.ino`.
+Tambem da para inverter sem reenviar o sketch:
+
+```powershell
+.\scripts\bridge-hx711-online.ps1 -PortName COM18 -StableRangeKg 0.03 -StableWindow 10 -CalibrationFactor 7050
+```
+
+Para zerar a balanca pelo script, deixe ela vazia e use:
+
+```powershell
+.\scripts\bridge-hx711-online.ps1 -PortName COM18 -TareOnStart
+```
+
 Se o valor ficar errado, ajuste `CALIBRATION_FACTOR` ate bater com um peso conhecido.

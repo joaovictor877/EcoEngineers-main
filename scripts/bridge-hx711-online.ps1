@@ -10,7 +10,9 @@ param(
   [double]$ZeroBelowKg = 0.03,
   [double]$MaxNegativeKg = -0.25,
   [int]$StableWindow = 8,
-  [double]$StableRangeKg = 0.05
+  [double]$StableRangeKg = 0.05,
+  [double]$CalibrationFactor = 0,
+  [switch]$TareOnStart
 )
 
 if ([string]::IsNullOrWhiteSpace($ApiUrl)) {
@@ -39,7 +41,19 @@ $recentWeights = [System.Collections.Generic.Queue[double]]::new()
 try {
   $serial.Open()
   Write-Host "Lendo $PortName em $BaudRate baud e enviando para $ApiUrl"
-  Write-Host "Deixe esta janela aberta durante a apresentacao. Ctrl+C para parar."
+  Write-Host "Deixe esta janela aberta. Ctrl+C para parar."
+
+  Start-Sleep -Milliseconds 1800
+  if ($CalibrationFactor -ne 0) {
+    $serial.WriteLine("c$CalibrationFactor")
+    Write-Host "Calibracao enviada ao Arduino: $CalibrationFactor"
+    Start-Sleep -Milliseconds 500
+  }
+  if ($TareOnStart) {
+    $serial.WriteLine("t")
+    Write-Host "Tara enviada ao Arduino. Use isso apenas com a balanca vazia."
+    Start-Sleep -Milliseconds 700
+  }
 
   while ($true) {
     try {
