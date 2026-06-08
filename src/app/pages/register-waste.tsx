@@ -359,6 +359,7 @@ export function RegisterWaste() {
   const [isDetectedByAI, setIsDetectedByAI] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
+  const lastWeightToastRef = useRef(0);
 
   const getApiErrorMessage = (error: any, fallback: string) => {
     const serverMessage = error?.response?.data?.error;
@@ -371,9 +372,20 @@ export function RegisterWaste() {
     socketRef.current = io(SOCKET_URL, { transports: ["websocket", "polling"] });
 
     socketRef.current.on("peso_atualizado", (data: { peso: number; dispositivo: string }) => {
-      setFormData((prev) => ({ ...prev, weight: String(data.peso) }));
-      setHwStatus((prev) => ({ ...prev, esp32: "conectado", sensor: "ativo" }));
-      toast.success(`⚖️ Peso recebido: ${data.peso} kg — ${data.dispositivo}`);
+      const peso = Number(data.peso);
+      if (!Number.isFinite(peso)) return;
+
+      const formattedWeight = peso.toFixed(2);
+      setFormData((prev) => (
+        prev.weight === formattedWeight ? prev : { ...prev, weight: formattedWeight }
+      ));
+      setHwStatus((prev) => ({ ...prev, arduino: "conectado", sensor: "ativo" }));
+
+      const now = Date.now();
+      if (now - lastWeightToastRef.current > 10000) {
+        toast.success(`Peso conectado: ${formattedWeight} kg — ${data.dispositivo || "Arduino UNO HX711"}`);
+        lastWeightToastRef.current = now;
+      }
     });
 
     socketRef.current.on("analise_ia_concluida", (data: AIResult) => {
