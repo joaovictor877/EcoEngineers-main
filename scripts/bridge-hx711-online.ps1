@@ -12,6 +12,7 @@ param(
   [int]$StableWindow = 8,
   [double]$StableRangeKg = 0.05,
   [double]$CalibrationFactor = 0,
+  [switch]$InvertSign,
   [switch]$TareOnStart
 )
 
@@ -80,6 +81,10 @@ try {
       }
 
       $weight = [double]$reading.peso
+      if ($InvertSign) {
+        $weight = -1 * $weight
+      }
+
       if ($weight -lt 0 -and $weight -ge -$ZeroBelowKg) {
         $weight = 0
       }
