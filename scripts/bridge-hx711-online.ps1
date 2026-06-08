@@ -6,7 +6,9 @@ param(
   [string]$ApiKey = $env:HARDWARE_API_KEY,
   [int]$BaudRate = 57600,
   [int]$MinIntervalMs = 600,
-  [double]$MinDeltaKg = 0.02
+  [double]$MinDeltaKg = 0.02,
+  [double]$ZeroBelowKg = 0.03,
+  [double]$MaxNegativeKg = -0.25
 )
 
 if ([string]::IsNullOrWhiteSpace($ApiUrl)) {
@@ -29,6 +31,7 @@ $headers = @{
 
 $lastSentAt = [DateTime]::MinValue
 $lastSentWeight = $null
+$lastHx711WarningAt = [DateTime]::MinValue
 
 try {
   $serial.Open()
@@ -49,11 +52,28 @@ try {
 
       if ($null -eq $reading.peso) {
         if ($reading.status) { Write-Host "Arduino: $($reading.status)" }
-        if ($reading.error) { Write-Warning "Arduino: $($reading.error)" }
+        if ($reading.error) {
+          $now = Get-Date
+          if (($now - $lastHx711WarningAt).TotalSeconds -ge 4) {
+            Write-Warning "Arduino: $($reading.error)"
+            $lastHx711WarningAt = $now
+          }
+        }
         continue
       }
 
       $weight = [double]$reading.peso
+      if ($weight -lt 0 -and $weight -ge -$ZeroBelowKg) {
+        $weight = 0
+      }
+      if ($weight -lt $MaxNegativeKg) {
+        Write-Warning ("Leitura negativa ignorada: {0:N3} kg" -f $weight)
+        continue
+      }
+      if ($weight -lt 0) {
+        $weight = 0
+      }
+
       $now = Get-Date
       $elapsedMs = ($now - $lastSentAt).TotalMilliseconds
       $changedEnough = $null -eq $lastSentWeight -or [Math]::Abs($weight - $lastSentWeight) -ge $MinDeltaKg
