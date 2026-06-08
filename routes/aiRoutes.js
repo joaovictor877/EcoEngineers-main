@@ -2,12 +2,12 @@
 
 const express = require('express');
 const router  = express.Router();
-const path    = require('path');
 const fs      = require('fs');
 const multer  = require('multer');
 const { analisarMaterial, capturarFrameCamera } = require('../services/aiService');
+const { getUploadsDir } = require('../services/uploadDir');
 
-const uploadsDir = path.join(__dirname, '..', 'uploads');
+const uploadsDir = getUploadsDir();
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -105,7 +105,7 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
       return res.json(payload);
     } catch (err) {
       console.error('[IA] Erro /capturar-camera:', err.message);
-      const unreachable = ['fetch failed', 'ECONNREFUSED', 'ETIMEDOUT', 'timeout', 'ENETUNREACH'].some(k =>
+      const unreachable = ['fetch failed', 'ECONNREFUSED', 'ETIMEDOUT', 'timeout', 'ENETUNREACH', 'HTTP 530', 'Camera inacessivel'].some(k =>
         (err.message || '').toLowerCase().includes(k.toLowerCase())
       );
       if (unreachable) {

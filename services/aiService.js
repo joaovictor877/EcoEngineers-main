@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getUploadsDir } = require('./uploadDir');
 
 const MATERIAIS = [
   { nome: 'Cavaco de Aço',       categoria: 'Metal Ferroso',     destino: 'reaproveitamento', obs: 'Identificado como cavaco metálico ferroso escurecido.' },
@@ -114,9 +115,9 @@ async function analisarMaterial(file) {
  */
 async function capturarFrameCamera(cameraUrl) {
   const base = cameraUrl.replace(/\/+$/, '');
-  // Try photo.jpg (IP Webcam for Android), fall back to shot.jpg
   const candidates = [`${base}/photo.jpg`, `${base}/shot.jpg`];
-  const uploadsDir = path.join(__dirname, '..', 'uploads');
+  const streamCandidates = [`${base}/video`, `${base}/videofeed`, `${base}/mjpeg`];
+  const uploadsDir = getUploadsDir();
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
   let lastErr;
@@ -134,4 +135,84 @@ async function capturarFrameCamera(cameraUrl) {
   throw lastErr || new Error('Câmera inacessível');
 }
 
-module.exports = { analisarMaterial, capturarFrameCamera };
+async function capturarFrameCameraOtimizada(cameraUrl) {
+  const base = cameraUrl.replace(/\/+$/, '');
+  const uploadsDir = getUploadsDir();
+  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+  const saveFrame = (buffer) => {
+    if (!buffer || buffer.length < 1024) throw new Error('Frame da camera vazio ou invalido');
+    const filename = `cam_${Date.now()}.jpg`;
+    const filepath = path.join(uploadsDir, filename);
+    fs.writeFileSync(filepath, buffer);
+    return { fieldname: 'imagem', originalname: filename, filename, path: filepath, mimetype: 'image/jpeg', size: buffer.length };
+  };
+
+  const snapshotCandidates = [`${base}/photo.jpg`, `${base}/shot.jpg`];
+  const streamCandidates = [`${base}/video`, `${base}/videofeed`, `${base}/mjpeg`];
+  let lastErr;
+
+  for (const snapshotUrl of snapshotCandidates) {
+    try {
+      const resp = await fetch(snapshotUrl, {
+        headers: { 'User-Agent': 'EcoEngineers/1.0' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!resp.ok) { lastErr = new Error(`HTTP ${resp.status} from ${snapshotUrl}`); continue; }
+      return saveFrame(Buffer.from(await resp.arrayBuffer()));
+    } catch (e) { lastErr = e; }
+  }
+
+  for (const streamUrl of streamCandidates) {
+    try {
+      return saveFrame(await capturarFrameMjpeg(streamUrl));
+    } catch (e) { lastErr = e; }
+  }
+
+  throw lastErr || new Error('Camera inacessivel');
+}
+
+async function capturarFrameMjpeg(streamUrl) {
+  const resp = await fetch(streamUrl, {
+    headers: { 'User-Agent': 'EcoEngineers/1.0' },
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${streamUrl}`);
+  if (!resp.body) throw new Error(`Stream sem corpo em ${streamUrl}`);
+
+  const reader = resp.body.getReader();
+  const chunks = [];
+  let totalLength = 0;
+  const maxBytes = 4 * 1024 * 1024;
+
+  try {
+    while (totalLength < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = Buffer.from(value);
+      chunks.push(chunk);
+      totalLength += chunk.length;
+
+      const frame = extrairJpeg(Buffer.concat(chunks, totalLength));
+      if (frame) return frame;
+    }
+  } finally {
+    try { await reader.cancel(); } catch (_) {}
+  }
+
+  throw new Error(`Nao foi possivel extrair frame JPEG de ${streamUrl}`);
+}
+
+function extrairJpeg(buffer) {
+  const start = buffer.indexOf(Buffer.from([0xff, 0xd8]));
+  if (start < 0) return null;
+
+  const end = buffer.indexOf(Buffer.from([0xff, 0xd9]), start + 2);
+  if (end < 0) return null;
+
+  return buffer.subarray(start, end + 2);
+}
+
+module.exports = { analisarMaterial, capturarFrameCamera: capturarFrameCameraOtimizada };

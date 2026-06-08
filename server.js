@@ -9,6 +9,7 @@ const { Pool } = require('pg');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { getUploadsDir } = require('./services/uploadDir');
 
 const databaseUrl = process.env.DATABASE_URL;
 const jwtSecret = process.env.JWT_SECRET;
@@ -274,7 +275,7 @@ if (hasFrontendBuild) {
 }
 
 // Serve imagens capturadas pela IA
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(getUploadsDir()));
 
 // Rotas estendidas — Hardware, IA, Câmeras
 const hardwareRoutes = require('./routes/hardwareRoutes')(dbQuery, dbClient, io, authMiddleware);
