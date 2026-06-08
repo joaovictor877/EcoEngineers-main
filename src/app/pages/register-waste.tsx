@@ -359,7 +359,7 @@ export function RegisterWaste() {
   const [isDetectedByAI, setIsDetectedByAI] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
-  const lastWeightToastRef = useRef(0);
+  const weightConnectionNotifiedRef = useRef(false);
 
   const getApiErrorMessage = (error: any, fallback: string) => {
     const serverMessage = error?.response?.data?.error;
@@ -381,10 +381,9 @@ export function RegisterWaste() {
       ));
       setHwStatus((prev) => ({ ...prev, arduino: "conectado", sensor: "ativo" }));
 
-      const now = Date.now();
-      if (now - lastWeightToastRef.current > 10000) {
-        toast.success(`Peso conectado: ${formattedWeight} kg — ${data.dispositivo || "Arduino UNO HX711"}`);
-        lastWeightToastRef.current = now;
+      if (!weightConnectionNotifiedRef.current) {
+        toast.success(`Arduino e HX711 ativos — peso inicial: ${formattedWeight} kg`);
+        weightConnectionNotifiedRef.current = true;
       }
     });
 

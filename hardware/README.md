@@ -48,14 +48,27 @@ Descubra a porta COM do Arduino no Arduino IDE em `Tools > Port`.
 No PowerShell, rode:
 
 ```powershell
-$env:HARDWARE_API_URL="https://SEU-DOMINIO.com/api/hardware/peso"
-$env:HARDWARE_API_KEY="A_MESMA_CHAVE_DO_BACKEND_ONLINE"
-.\scripts\bridge-hx711-online.ps1 -PortName COM3
+$env:HARDWARE_API_URL="https://ecoengineers.azurewebsites.net/api/hardware/peso"
+$env:HARDWARE_API_KEY="eco-hw-key-2026"
+.\scripts\bridge-hx711-online.ps1 -PortName COM18
 ```
 
-Troque `COM3` pela porta real.
+Troque `COM18` pela porta real.
 
 Deixe essa janela aberta. Quando o Arduino enviar peso pela serial, o script manda para o backend online e a tela do site recebe pelo Socket.IO.
+
+Por padrao, a ponte so envia o peso quando a leitura fica estavel em uma janela de 8 amostras, com variacao maxima de `0.05 kg`.
+Para deixar mais firme, use um range menor:
+
+```powershell
+.\scripts\bridge-hx711-online.ps1 -PortName COM18 -StableRangeKg 0.03 -StableWindow 10
+```
+
+Para responder mais rapido, use uma janela menor:
+
+```powershell
+.\scripts\bridge-hx711-online.ps1 -PortName COM18 -StableRangeKg 0.06 -StableWindow 5
+```
 
 ## 3. Apresentacao
 

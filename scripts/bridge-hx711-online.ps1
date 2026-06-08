@@ -8,7 +8,9 @@ param(
   [int]$MinIntervalMs = 600,
   [double]$MinDeltaKg = 0.02,
   [double]$ZeroBelowKg = 0.03,
-  [double]$MaxNegativeKg = -0.25
+  [double]$MaxNegativeKg = -0.25,
+  [int]$StableWindow = 8,
+  [double]$StableRangeKg = 0.05
 )
 
 if ([string]::IsNullOrWhiteSpace($ApiUrl)) {
@@ -32,6 +34,7 @@ $headers = @{
 $lastSentAt = [DateTime]::MinValue
 $lastSentWeight = $null
 $lastHx711WarningAt = [DateTime]::MinValue
+$recentWeights = [System.Collections.Generic.Queue[double]]::new()
 
 try {
   $serial.Open()
@@ -74,24 +77,52 @@ try {
         $weight = 0
       }
 
+      if ($weight -lt $ZeroBelowKg) {
+        $weight = 0
+      }
+
+      $recentWeights.Enqueue($weight)
+      while ($recentWeights.Count -gt $StableWindow) {
+        [void]$recentWeights.Dequeue()
+      }
+
+      if ($recentWeights.Count -lt $StableWindow) {
+        continue
+      }
+
+      $weights = $recentWeights.ToArray()
+      $minWeight = ($weights | Measure-Object -Minimum).Minimum
+      $maxWeight = ($weights | Measure-Object -Maximum).Maximum
+      $range = $maxWeight - $minWeight
+
+      if ($range -gt $StableRangeKg) {
+        continue
+      }
+
+      $stableWeight = ($weights | Measure-Object -Average).Average
+      if ($stableWeight -lt $ZeroBelowKg) {
+        $stableWeight = 0
+      }
+      $stableWeight = [Math]::Round($stableWeight, 3)
+
       $now = Get-Date
       $elapsedMs = ($now - $lastSentAt).TotalMilliseconds
-      $changedEnough = $null -eq $lastSentWeight -or [Math]::Abs($weight - $lastSentWeight) -ge $MinDeltaKg
+      $changedEnough = $null -eq $lastSentWeight -or [Math]::Abs($stableWeight - $lastSentWeight) -ge $MinDeltaKg
 
-      if ($elapsedMs -lt $MinIntervalMs -and -not $changedEnough) {
+      if (-not $changedEnough -or $elapsedMs -lt $MinIntervalMs) {
         continue
       }
 
       $body = @{
-        peso = [Math]::Round($weight, 3)
+        peso = $stableWeight
         dispositivo = if ($reading.dispositivo) { [string]$reading.dispositivo } else { "Arduino UNO HX711" }
       } | ConvertTo-Json -Compress
 
       Invoke-RestMethod -Uri $ApiUrl -Method Post -Headers $headers -ContentType "application/json" -Body $body | Out-Null
 
       $lastSentAt = $now
-      $lastSentWeight = $weight
-      Write-Host ("Peso enviado: {0:N3} kg" -f $weight)
+      $lastSentWeight = $stableWeight
+      Write-Host ("Peso estavel enviado: {0:N3} kg" -f $stableWeight)
     } catch [System.TimeoutException] {
       continue
     } catch {
