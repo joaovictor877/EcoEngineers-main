@@ -367,6 +367,11 @@ export function RegisterWaste() {
     return fallback;
   };
 
+  const formatWeightKg = (peso: number) =>
+    peso.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
+  const parseWeightKg = (peso: string) => Number(peso.replace(",", "."));
+
   // ── Socket.IO ──────────────────────────────────────────────
   useEffect(() => {
     socketRef.current = io(SOCKET_URL, { transports: ["websocket", "polling"] });
@@ -375,7 +380,7 @@ export function RegisterWaste() {
       const peso = Number(data.peso);
       if (!Number.isFinite(peso)) return;
 
-      const formattedWeight = peso.toFixed(2);
+      const formattedWeight = formatWeightKg(peso);
       setFormData((prev) => (
         prev.weight === formattedWeight ? prev : { ...prev, weight: formattedWeight }
       ));
@@ -493,15 +498,16 @@ export function RegisterWaste() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const pesoKg = parseWeightKg(formData.weight);
     if (!formData.material_id) { toast.error("Selecione o tipo de material"); return; }
-    if (!formData.weight || Number(formData.weight) <= 0) { toast.error("Informe o peso corretamente"); return; }
+    if (!formData.weight || !Number.isFinite(pesoKg) || pesoKg <= 0) { toast.error("Informe o peso corretamente"); return; }
     if (!formData.department) { toast.error("Selecione o setor de origem"); return; }
     if (!formData.destination) { toast.error("Selecione o destino"); return; }
     setIsSubmitting(true);
     try {
       await api.post("/api/residuos", {
         material_id: Number(formData.material_id),
-        peso: Number(formData.weight),
+        peso: pesoKg,
         setor_origem: formData.department,
         destino: formData.destination,
         observacao: formData.observation,
@@ -738,7 +744,7 @@ export function RegisterWaste() {
                   Peso (kg)
                   {hwStatus.sensor === "ativo" && <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-normal">Auto — Sensor HX711</span>}
                 </label>
-                <input type="number" step="0.01" min="0" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} className={inputClass(hwStatus.sensor === "ativo")} placeholder="0.00" required />
+                <input type="text" inputMode="decimal" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value.replace(".", ",") })} className={inputClass(hwStatus.sensor === "ativo")} placeholder="0,000" required />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
