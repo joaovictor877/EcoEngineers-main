@@ -380,7 +380,11 @@ export function RegisterWaste() {
       const peso = Number(data.peso);
       if (!Number.isFinite(peso)) return;
 
+<<<<<<< HEAD
       const formattedWeight = formatWeightKg(peso);
+=======
+      const formattedWeight = peso.toFixed(3);
+>>>>>>> 9c6a02bfa97a97e01f55332e02d03056163e17a4
       setFormData((prev) => (
         prev.weight === formattedWeight ? prev : { ...prev, weight: formattedWeight }
       ));
@@ -744,7 +748,11 @@ export function RegisterWaste() {
                   Peso (kg)
                   {hwStatus.sensor === "ativo" && <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-normal">Auto — Sensor HX711</span>}
                 </label>
+<<<<<<< HEAD
                 <input type="text" inputMode="decimal" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value.replace(".", ",") })} className={inputClass(hwStatus.sensor === "ativo")} placeholder="0,000" required />
+=======
+                <input type="number" step="0.001" min="0" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} className={inputClass(hwStatus.sensor === "ativo")} placeholder="0.000" required />
+>>>>>>> 9c6a02bfa97a97e01f55332e02d03056163e17a4
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
