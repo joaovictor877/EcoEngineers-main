@@ -375,7 +375,7 @@ export function RegisterWaste() {
       const peso = Number(data.peso);
       if (!Number.isFinite(peso)) return;
 
-      const formattedWeight = peso.toFixed(2);
+      const formattedWeight = peso.toFixed(3);
       setFormData((prev) => (
         prev.weight === formattedWeight ? prev : { ...prev, weight: formattedWeight }
       ));
