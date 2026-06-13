@@ -738,7 +738,7 @@ export function RegisterWaste() {
                   Peso (kg)
                   {hwStatus.sensor === "ativo" && <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-normal">Auto — Sensor HX711</span>}
                 </label>
-                <input type="number" step="0.01" min="0" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} className={inputClass(hwStatus.sensor === "ativo")} placeholder="0.00" required />
+                <input type="number" step="0.001" min="0" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} className={inputClass(hwStatus.sensor === "ativo")} placeholder="0.000" required />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
