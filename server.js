@@ -605,6 +605,7 @@ const port = process.env.PORT || 4000;
 async function start() {
   try {
     await dbQuery('SELECT 1');
+    await require('./services/migrationRunner').runMigrations(dbClient, databaseUrl, dbSsl);
     require('./services/mqttService').start(dbQuery, io);
     httpServer.listen(port, () => console.log(`[EcoEngineers] Server running on :${port} | db=${dbClient} schema=${dbSchema} | Socket.IO enabled`));
   } catch (err) {
