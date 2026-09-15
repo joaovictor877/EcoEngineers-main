@@ -5,6 +5,7 @@ import { ValidationStation } from "./pages/validation-station";
 import { RegisterWaste } from "./pages/register-waste";
 import { TrackingMaterial } from "./pages/tracking-material";
 import { ProductManagement } from "./pages/product-management";
+import { CameraManagement } from "./pages/camera-management";
 import { MaterialManagement } from "./pages/material-management";
 import { Reports } from "./pages/reports";
 import { Settings } from "./pages/settings";
@@ -60,6 +61,10 @@ export const router = createBrowserRouter([
       {
         path: "products",
         Component: () => <RequireRole path="/products"><ProductManagement /></RequireRole>,
+      },
+      {
+        path: "cameras",
+        Component: () => <RequireRole path="/cameras"><CameraManagement /></RequireRole>,
       },
       {
         path: "materials",

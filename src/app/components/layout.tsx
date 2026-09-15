@@ -11,6 +11,7 @@ import {
   X,
   ScanLine,
   Tags,
+  Camera,
 } from "lucide-react";
 import { useState } from "react";
 import { useCurrentUser, canAccess } from "../lib/useCurrentUser";
@@ -19,6 +20,7 @@ import { PageHeader } from "./page-header";
 const ALL_NAV = [
   { path: "/",                  label: "Dashboard",             icon: LayoutDashboard },
   { path: "/validation-station",label: "Posto de Validação",    icon: ScanLine        },
+  { path: "/cameras",           label: "Câmeras",                icon: Camera          },
   { path: "/register-waste",    label: "Registrar Resíduo",     icon: FileInput       },
   { path: "/tracking",          label: "Rastreamento",          icon: Route           },
   { path: "/products",          label: "Produtos & Etiquetas",  icon: Tags            },

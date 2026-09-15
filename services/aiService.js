@@ -136,6 +136,11 @@ async function capturarFrameCamera(cameraUrl) {
 }
 
 async function capturarFrameCameraOtimizada(cameraUrl) {
+  if (/^rtsps?:\/\//i.test(cameraUrl)) {
+    const { captureRtspSnapshot } = require('./ffmpegService');
+    return captureRtspSnapshot(cameraUrl);
+  }
+
   const base = cameraUrl.replace(/\/+$/, '');
   const uploadsDir = getUploadsDir();
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });

@@ -2,6 +2,18 @@
 
 const express = require('express');
 const router  = express.Router();
+const { spawnMjpegBridge } = require('../services/ffmpegService');
+
+// Monta a URL RTSP completa (com credenciais embutidas) a partir dos campos
+// separados que o formulário envia — evita o usuário ter que digitar a URL
+// crua e reduz erro de formatação.
+function montarUrlRtsp({ rtsp_ip, rtsp_porta, rtsp_usuario, rtsp_chave, rtsp_canal, rtsp_subtipo }) {
+  const porta = rtsp_porta || 554;
+  const usuario = rtsp_usuario || 'admin';
+  const canal = rtsp_canal || 1;
+  const subtipo = rtsp_subtipo !== undefined && rtsp_subtipo !== '' ? rtsp_subtipo : 0;
+  return `rtsp://${encodeURIComponent(usuario)}:${encodeURIComponent(rtsp_chave || '')}@${rtsp_ip}:${porta}/cam/realmonitor?channel=${canal}&subtype=${subtipo}`;
+}
 
 module.exports = function (dbQuery, dbClient, io, authMiddleware) {
 
@@ -15,38 +27,72 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
     }
   });
 
-  // POST /api/cameras — { nome, url_stream }
+  // POST /api/cameras
+  // HTTP:  { nome, protocolo: 'http', url_stream }
+  // RTSP:  { nome, protocolo: 'rtsp', rtsp_ip, rtsp_porta, rtsp_usuario, rtsp_chave, rtsp_canal, rtsp_subtipo }
   router.post('/', authMiddleware, async (req, res) => {
-    const { nome, url_stream } = req.body;
-    if (!nome || !url_stream) return res.status(400).json({ error: 'nome e url_stream são obrigatórios' });
+    const { nome, protocolo } = req.body;
+    if (!nome) return res.status(400).json({ error: 'nome é obrigatório' });
+
+    let urlStream;
+    if (protocolo === 'rtsp') {
+      if (!req.body.rtsp_ip || !req.body.rtsp_chave) {
+        return res.status(400).json({ error: 'IP e chave de acesso são obrigatórios para câmeras RTSP' });
+      }
+      urlStream = montarUrlRtsp(req.body);
+    } else {
+      if (!req.body.url_stream) return res.status(400).json({ error: 'url_stream é obrigatória' });
+      urlStream = req.body.url_stream;
+    }
 
     try {
       if (dbClient === 'mysql') {
-        const ins = await dbQuery('INSERT INTO cameras (nome, url_stream) VALUES ($1,$2)', [nome, url_stream]);
-        const r   = await dbQuery('SELECT * FROM cameras WHERE id = $1', [ins.raw.insertId]);
+        const ins = await dbQuery(
+          'INSERT INTO cameras (nome, url_stream, protocolo) VALUES ($1,$2,$3)',
+          [nome, urlStream, protocolo === 'rtsp' ? 'rtsp' : 'http']
+        );
+        const r = await dbQuery('SELECT * FROM cameras WHERE id = $1', [ins.raw.insertId]);
         return res.json(r.rows[0]);
       }
-      const r = await dbQuery('INSERT INTO cameras (nome, url_stream) VALUES ($1,$2) RETURNING *', [nome, url_stream]);
+      const r = await dbQuery(
+        'INSERT INTO cameras (nome, url_stream, protocolo) VALUES ($1,$2,$3) RETURNING *',
+        [nome, urlStream, protocolo === 'rtsp' ? 'rtsp' : 'http']
+      );
       return res.json(r.rows[0]);
     } catch (err) {
+      console.error('[Cameras] Erro ao criar:', err.message);
       return res.status(500).json({ error: 'Falha ao salvar câmera' });
     }
   });
 
-  // PUT /api/cameras/:id — { nome, url_stream, status }
+  // PUT /api/cameras/:id — mesmos campos do POST, + status
   router.put('/:id', authMiddleware, async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
 
-    const { nome, url_stream, status } = req.body;
+    const { nome, protocolo, status } = req.body;
     const allowedStatus = ['ativa', 'inativa', 'erro'];
     const st = allowedStatus.includes(status) ? status : 'ativa';
 
+    let urlStream;
+    if (protocolo === 'rtsp') {
+      if (!req.body.rtsp_ip || !req.body.rtsp_chave) {
+        return res.status(400).json({ error: 'IP e chave de acesso são obrigatórios para câmeras RTSP' });
+      }
+      urlStream = montarUrlRtsp(req.body);
+    } else {
+      urlStream = req.body.url_stream;
+    }
+
     try {
-      await dbQuery('UPDATE cameras SET nome = $1, url_stream = $2, status = $3 WHERE id = $4', [nome, url_stream, st, id]);
+      await dbQuery(
+        'UPDATE cameras SET nome = $1, url_stream = $2, protocolo = $3, status = $4 WHERE id = $5',
+        [nome, urlStream, protocolo === 'rtsp' ? 'rtsp' : 'http', st, id]
+      );
       const r = await dbQuery('SELECT * FROM cameras WHERE id = $1', [id]);
       return res.json(r.rows[0]);
     } catch (err) {
+      console.error('[Cameras] Erro ao atualizar:', err.message);
       return res.status(500).json({ error: 'Falha ao atualizar câmera' });
     }
   });
@@ -60,6 +106,75 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
       return res.json({ ok: true });
     } catch (err) {
       return res.status(500).json({ error: 'Falha ao remover câmera' });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // GET /api/cameras/:id/live — preview ao vivo de uma câmera salva.
+  // RTSP (ex: Intelbras Mibo): converte para MJPEG via ffmpeg.
+  // HTTP: repassa o stream da câmera (mesmo comportamento do proxy-stream).
+  // Autenticação por header OU ?token=... (necessário pois <img>/<video>
+  // não enviam cabeçalho Authorization).
+  // ─────────────────────────────────────────────────────────
+  router.get('/:id/live', authMiddleware, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+    let camera;
+    try {
+      const r = await dbQuery('SELECT * FROM cameras WHERE id = $1', [id]);
+      camera = r.rows[0];
+    } catch (err) {
+      return res.status(500).json({ error: 'Falha ao buscar câmera' });
+    }
+    if (!camera) return res.status(404).json({ error: 'Câmera não encontrada' });
+
+    if (camera.protocolo === 'rtsp') {
+      const ffmpeg = spawnMjpegBridge(camera.url_stream);
+      let headersSent = false;
+
+      ffmpeg.stdout.once('data', () => {
+        if (!headersSent) {
+          headersSent = true;
+          res.setHeader('Content-Type', 'multipart/x-mixed-replace; boundary=ffserver');
+          res.setHeader('Cache-Control', 'no-store');
+        }
+      });
+      ffmpeg.stdout.pipe(res);
+
+      let stderrTail = '';
+      ffmpeg.stderr.on('data', (d) => { stderrTail = (stderrTail + d.toString()).slice(-800); });
+
+      const cleanup = () => { try { ffmpeg.kill('SIGKILL'); } catch (_) {} };
+      req.on('close', cleanup);
+      ffmpeg.on('error', cleanup);
+      ffmpeg.on('close', (code) => {
+        if (!headersSent && !res.headersSent) {
+          res.status(502).json({ error: 'Não foi possível conectar na câmera RTSP: ' + stderrTail });
+        } else if (!res.writableEnded) {
+          res.end();
+        }
+      });
+      return;
+    }
+
+    // HTTP: mesmo comportamento do proxy-stream, mas identificado por id
+    const ctrl = new AbortController();
+    const connectTimeout = setTimeout(() => ctrl.abort(new Error('timeout de conexão')), 6000);
+    req.on('close', () => ctrl.abort());
+    try {
+      const upstream = await fetch(camera.url_stream, { signal: ctrl.signal });
+      clearTimeout(connectTimeout);
+      const ct = upstream.headers.get('content-type') || 'multipart/x-mixed-replace; boundary=frame';
+      res.setHeader('Content-Type', ct);
+      res.setHeader('Cache-Control', 'no-store');
+      const { Readable } = require('stream');
+      Readable.fromWeb(upstream.body).pipe(res);
+    } catch (err) {
+      clearTimeout(connectTimeout);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Câmera inacessível a partir do servidor.' });
+      }
     }
   });
 

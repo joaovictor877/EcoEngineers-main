@@ -83,8 +83,11 @@ app.use(express.json());
 
 function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
-  if (!auth) return res.status(401).send({ error: 'No token' });
-  const token = auth.split(' ')[1];
+  // Tags <img>/<video> não conseguem enviar cabeçalho Authorization —
+  // aceitamos o token por query string (?token=...) para esses casos,
+  // usado pelo preview ao vivo das câmeras.
+  const token = auth ? auth.split(' ')[1] : req.query.token;
+  if (!token) return res.status(401).send({ error: 'No token' });
   try {
     req.user = jwt.verify(token, jwtSecret);
     next();

@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { API_URL } from "../lib/api";
 
 export type DevStatus = "conectado" | "desconectado" | "erro" | "ativo" | "inativo" | "ativa" | "inativa";
 
@@ -278,6 +279,69 @@ export const FastCameraPreview = memo(function FastCameraPreview({
       {isRetrying && (
         <div className="absolute inset-x-0 bottom-0 bg-black/55 px-3 py-2 text-xs font-medium text-white">
           {fallbackToSnapshots ? "Modo leve de emergência" : "Reconectando câmera..."}
+        </div>
+      )}
+    </div>
+  );
+});
+
+const LIVE_RETRY_DELAY_MS = 2000;
+
+/**
+ * Preview ao vivo de uma câmera salva (por id), via GET /api/cameras/:id/live.
+ * Funciona tanto para câmeras HTTP quanto RTSP (ex: Intelbras Mibo) — o
+ * backend decide como converter o stream, o front só exibe um <img>
+ * contínuo (multipart/x-mixed-replace).
+ */
+export const CameraLivePreview = memo(function CameraLivePreview({
+  cameraId,
+  onStatusChange,
+}: {
+  cameraId: number;
+  onStatusChange?: (status: DevStatus) => void;
+}) {
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const retryTimerRef = useRef<number | null>(null);
+  const onStatusChangeRef = useRef(onStatusChange);
+  const [nonce, setNonce] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  }, [onStatusChange]);
+
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!img) return;
+
+    const token = localStorage.getItem("token") || "";
+    const src = `${API_URL}/api/cameras/${cameraId}/live?token=${encodeURIComponent(token)}&s=${nonce}`;
+
+    img.onload = () => {
+      setIsRetrying(false);
+      onStatusChangeRef.current?.("ativa");
+    };
+    img.onerror = () => {
+      setIsRetrying(true);
+      onStatusChangeRef.current?.("erro");
+      retryTimerRef.current = window.setTimeout(() => setNonce((n) => n + 1), LIVE_RETRY_DELAY_MS);
+    };
+    img.src = src;
+
+    return () => {
+      if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+      img.onload = null;
+      img.onerror = null;
+      img.removeAttribute("src");
+    };
+  }, [cameraId, nonce]);
+
+  return (
+    <div className="relative w-full h-full bg-black">
+      <img ref={imgRef} alt="Câmera ao vivo" className="w-full h-full object-cover" decoding="async" />
+      {isRetrying && (
+        <div className="absolute inset-x-0 bottom-0 bg-black/55 px-3 py-2 text-xs font-medium text-white">
+          Conectando à câmera...
         </div>
       )}
     </div>

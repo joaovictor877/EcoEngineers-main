@@ -34,7 +34,7 @@ export function useCurrentUser(): CurrentUser | null {
 export function canAccess(role: UserRole | undefined, path: string): boolean {
   if (!role) return false;
   if (role === 'admin') return true;
-  const operadorRoutes = ['/', '/register-waste', '/tracking', '/validation-station'];
+  const operadorRoutes = ['/', '/register-waste', '/tracking', '/validation-station', '/cameras'];
   const gestorRoutes   = ['/', '/tracking', '/reports'];
   if (role === 'operador') return operadorRoutes.includes(path);
   if (role === 'gestor')   return gestorRoutes.includes(path);
