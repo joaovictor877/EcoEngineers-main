@@ -2,7 +2,22 @@
 
 const express = require('express');
 const router  = express.Router();
+const fs      = require('fs');
+const path    = require('path');
+const multer  = require('multer');
 const { spawnMjpegBridge } = require('../services/ffmpegService');
+const { getUploadsDir } = require('../services/uploadDir');
+
+const uploadsDir = getUploadsDir();
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+// Frame "ao vivo" — sempre sobrescreve o mesmo arquivo por câmera, então
+// o preview no navegador só precisa apontar pra essa URL fixa.
+const pushStorage = multer.diskStorage({
+  destination: uploadsDir,
+  filename: (req, file, cb) => cb(null, `camera_live_${req.params.id}.jpg`),
+});
+const uploadPush = multer({ storage: pushStorage, limits: { fileSize: 5 * 1024 * 1024 } });
 
 // Monta a URL RTSP completa (com credenciais embutidas) a partir dos campos
 // separados que o formulário envia — evita o usuário ter que digitar a URL
@@ -16,6 +31,14 @@ function montarUrlRtsp({ rtsp_ip, rtsp_porta, rtsp_usuario, rtsp_chave, rtsp_can
 }
 
 module.exports = function (dbQuery, dbClient, io, authMiddleware) {
+  const hardwareApiKey = process.env.HARDWARE_API_KEY;
+  function hwKeyMiddleware(req, res, next) {
+    const key = req.headers['x-api-key'];
+    if (!hardwareApiKey || key !== hardwareApiKey) {
+      return res.status(401).json({ error: 'x-api-key inválida ou ausente' });
+    }
+    next();
+  }
 
   // GET /api/cameras
   router.get('/', authMiddleware, async (req, res) => {
@@ -33,6 +56,7 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
   router.post('/', authMiddleware, async (req, res) => {
     const { nome, protocolo } = req.body;
     if (!nome) return res.status(400).json({ error: 'nome é obrigatório' });
+    const modoConexao = req.body.modo_conexao === 'push' ? 'push' : 'pull';
 
     let urlStream;
     if (protocolo === 'rtsp') {
@@ -48,15 +72,15 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
     try {
       if (dbClient === 'mysql') {
         const ins = await dbQuery(
-          'INSERT INTO cameras (nome, url_stream, protocolo) VALUES ($1,$2,$3)',
-          [nome, urlStream, protocolo === 'rtsp' ? 'rtsp' : 'http']
+          'INSERT INTO cameras (nome, url_stream, protocolo, modo_conexao) VALUES ($1,$2,$3,$4)',
+          [nome, urlStream, protocolo === 'rtsp' ? 'rtsp' : 'http', modoConexao]
         );
         const r = await dbQuery('SELECT * FROM cameras WHERE id = $1', [ins.raw.insertId]);
         return res.json(r.rows[0]);
       }
       const r = await dbQuery(
-        'INSERT INTO cameras (nome, url_stream, protocolo) VALUES ($1,$2,$3) RETURNING *',
-        [nome, urlStream, protocolo === 'rtsp' ? 'rtsp' : 'http']
+        'INSERT INTO cameras (nome, url_stream, protocolo, modo_conexao) VALUES ($1,$2,$3,$4) RETURNING *',
+        [nome, urlStream, protocolo === 'rtsp' ? 'rtsp' : 'http', modoConexao]
       );
       return res.json(r.rows[0]);
     } catch (err) {
@@ -73,6 +97,7 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
     const { nome, protocolo, status } = req.body;
     const allowedStatus = ['ativa', 'inativa', 'erro'];
     const st = allowedStatus.includes(status) ? status : 'ativa';
+    const modoConexao = req.body.modo_conexao === 'push' ? 'push' : 'pull';
 
     let urlStream;
     if (protocolo === 'rtsp') {
@@ -86,8 +111,8 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
 
     try {
       await dbQuery(
-        'UPDATE cameras SET nome = $1, url_stream = $2, protocolo = $3, status = $4 WHERE id = $5',
-        [nome, urlStream, protocolo === 'rtsp' ? 'rtsp' : 'http', st, id]
+        'UPDATE cameras SET nome = $1, url_stream = $2, protocolo = $3, status = $4, modo_conexao = $5 WHERE id = $6',
+        [nome, urlStream, protocolo === 'rtsp' ? 'rtsp' : 'http', st, modoConexao, id]
       );
       const r = await dbQuery('SELECT * FROM cameras WHERE id = $1', [id]);
       return res.json(r.rows[0]);
@@ -107,6 +132,24 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
     } catch (err) {
       return res.status(500).json({ error: 'Falha ao remover câmera' });
     }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // POST /api/cameras/:id/push-frame — chamado pela ponte local
+  // (scripts/bridge-camera-online.ps1), usado quando o servidor NÃO
+  // está na mesma rede da câmera (ex: Azure). A ponte roda perto da
+  // câmera e envia uma foto a cada poucos segundos.
+  // Header: x-api-key: <HARDWARE_API_KEY>
+  // Form-data: imagem (file)
+  // ─────────────────────────────────────────────────────────
+  router.post('/:id/push-frame', hwKeyMiddleware, uploadPush.single('imagem'), async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+    if (!req.file) return res.status(400).json({ error: 'Campo "imagem" é obrigatório' });
+
+    const imagemUrl = `/uploads/${req.file.filename}`;
+    io.emit('camera_frame', { camera_id: id, imagem_url: imagemUrl, t: Date.now() });
+    return res.json({ ok: true });
   });
 
   // ─────────────────────────────────────────────────────────

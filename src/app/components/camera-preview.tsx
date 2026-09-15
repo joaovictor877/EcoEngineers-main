@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { API_URL } from "../lib/api";
+import { socket } from "../lib/socket";
 
 export type DevStatus = "conectado" | "desconectado" | "erro" | "ativo" | "inativo" | "ativa" | "inativa";
 
@@ -342,6 +343,72 @@ export const CameraLivePreview = memo(function CameraLivePreview({
       {isRetrying && (
         <div className="absolute inset-x-0 bottom-0 bg-black/55 px-3 py-2 text-xs font-medium text-white">
           Conectando à câmera...
+        </div>
+      )}
+    </div>
+  );
+});
+
+/**
+ * Preview ao vivo no modo "push" — para quando o servidor NÃO consegue
+ * alcançar a câmera diretamente (ex: servidor no Azure, câmera numa rede
+ * local). Uma ponte local (scripts/bridge-camera-online.ps1) envia fotos
+ * periódicas pro backend, que repassa por Socket.IO no evento
+ * "camera_frame". Este componente só escuta esse evento e atualiza a imagem.
+ */
+export const CameraPushPreview = memo(function CameraPushPreview({
+  cameraId,
+  onStatusChange,
+}: {
+  cameraId: number;
+  onStatusChange?: (status: DevStatus) => void;
+}) {
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const onStatusChangeRef = useRef(onStatusChange);
+  const staleTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  }, [onStatusChange]);
+
+  useEffect(() => {
+    socket.connect();
+    setImageSrc(null);
+    onStatusChangeRef.current?.("inativa");
+
+    const markStale = () => {
+      onStatusChangeRef.current?.("erro");
+    };
+    const scheduleStale = () => {
+      if (staleTimerRef.current) window.clearTimeout(staleTimerRef.current);
+      // Sem frame novo por 10s = ponte local provavelmente parada.
+      staleTimerRef.current = window.setTimeout(markStale, 10000);
+    };
+
+    const onFrame = (data: { camera_id: number; imagem_url: string; t: number }) => {
+      if (data.camera_id !== cameraId) return;
+      setImageSrc(`${API_URL}${data.imagem_url}?t=${data.t}`);
+      onStatusChangeRef.current?.("ativa");
+      scheduleStale();
+    };
+
+    socket.on("camera_frame", onFrame);
+
+    return () => {
+      socket.off("camera_frame", onFrame);
+      if (staleTimerRef.current) window.clearTimeout(staleTimerRef.current);
+      socket.disconnect();
+    };
+  }, [cameraId]);
+
+  return (
+    <div className="relative w-full h-full bg-black flex items-center justify-center">
+      {imageSrc ? (
+        <img src={imageSrc} alt="Câmera ao vivo" className="w-full h-full object-cover" decoding="async" />
+      ) : (
+        <div className="text-center text-gray-400 p-6">
+          <p className="text-sm">Aguardando a ponte local enviar a primeira foto...</p>
+          <p className="text-xs mt-1 opacity-70">Rode scripts/bridge-camera-online.ps1 no PC da mesma rede da câmera.</p>
         </div>
       )}
     </div>

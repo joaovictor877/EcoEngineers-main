@@ -111,3 +111,29 @@ postos/<posto_id>/validacao  -> payload livre
 
 Sem essa variavel definida, o adaptador MQTT fica desativado e nao muda nada do
 comportamento atual.
+
+## 5. Camera Intelbras Mibo (RTSP) quando o servidor esta na nuvem (Azure/VPS)
+
+O servidor no Azure nao esta na mesma rede da sua camera Mibo (que fica no seu Wi-Fi
+local), entao ele nao consegue acessar o IP local dela diretamente. A solucao e a mesma
+usada para o sensor de peso: uma ponte local.
+
+```text
+Camera Mibo (RTSP) -> notebook na mesma rede -> bridge-camera-online.ps1 -> servidor online -> Socket.IO -> tela do site
+```
+
+1. Cadastre a camera no site (menu **Cameras** > **Nova Camera** > RTSP > modo "Rede
+   diferente do servidor"). Ao salvar, o site mostra o comando pronto pra copiar.
+2. Cole o comando num PowerShell aberto num PC/notebook que esteja na mesma rede da
+   camera, trocando `SUA_HARDWARE_API_KEY` pela mesma chave configurada no backend
+   (`HARDWARE_API_KEY`). Exemplo:
+
+```powershell
+.\scripts\bridge-camera-online.ps1 -RtspUrl "rtsp://admin:CHAVE@192.168.1.50:554/cam/realmonitor?channel=1&subtype=0" -CameraId 3 -ApiUrl "https://ecoengineers.azurewebsites.net" -ApiKey "eco-hw-key-2026"
+```
+
+3. Deixe a janela aberta. O script tira uma foto a cada poucos segundos (`-IntervalSeconds`,
+   padrao 2s) e manda pro servidor, que repassa em tempo real pra tela do site.
+4. Se a camera estiver na **mesma rede do servidor** (ex: testando local, ou uma VPS na
+   mesma rede), escolha o modo "Mesma rede do servidor" ao cadastrar — nesse caso o
+   proprio backend acessa o RTSP direto, sem precisar da ponte.

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Plus, Edit, Trash2, RefreshCw, Camera as CameraIcon, X, Wifi, Eye, EyeOff } from "lucide-react";
+import { Plus, Edit, Trash2, RefreshCw, Camera as CameraIcon, X, Wifi, Eye, EyeOff, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
-import api from "../lib/api";
-import { CameraLivePreview } from "../components/camera-preview";
+import api, { API_URL } from "../lib/api";
+import { CameraLivePreview, CameraPushPreview } from "../components/camera-preview";
 import type { DevStatus } from "../components/camera-preview";
 
 interface Camera {
@@ -10,6 +10,7 @@ interface Camera {
   nome: string;
   url_stream: string;
   protocolo: "http" | "rtsp";
+  modo_conexao: "pull" | "push";
   status: "ativa" | "inativa" | "erro";
   criado_em: string;
 }
@@ -17,6 +18,7 @@ interface Camera {
 type FormState = {
   nome: string;
   protocolo: "http" | "rtsp";
+  modo_conexao: "pull" | "push";
   url_stream: string;
   rtsp_ip: string;
   rtsp_porta: string;
@@ -27,10 +29,16 @@ type FormState = {
 };
 
 const EMPTY_FORM: FormState = {
-  nome: "", protocolo: "rtsp", url_stream: "",
+  nome: "", protocolo: "rtsp", modo_conexao: "push", url_stream: "",
   rtsp_ip: "", rtsp_porta: "554", rtsp_usuario: "admin", rtsp_chave: "",
   rtsp_canal: "1", rtsp_subtipo: "0",
 };
+
+function montarRtspUrl(f: FormState) {
+  const porta = f.rtsp_porta || "554";
+  const usuario = f.rtsp_usuario || "admin";
+  return `rtsp://${encodeURIComponent(usuario)}:${encodeURIComponent(f.rtsp_chave)}@${f.rtsp_ip}:${porta}/cam/realmonitor?channel=${f.rtsp_canal || "1"}&subtype=${f.rtsp_subtipo}`;
+}
 
 export function CameraManagement() {
   const [cameras, setCameras] = useState<Camera[]>([]);
@@ -42,6 +50,8 @@ export function CameraManagement() {
   const [showChave, setShowChave] = useState(false);
   const [previewId, setPreviewId] = useState<number | null>(null);
   const [previewStatus, setPreviewStatus] = useState<DevStatus>("inativa");
+  const [bridgeCommand, setBridgeCommand] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => { loadCameras(); }, []);
 
@@ -68,7 +78,10 @@ export function CameraManagement() {
 
   const openEdit = (c: Camera) => {
     setEditing(c);
-    setForm({ ...EMPTY_FORM, nome: c.nome, protocolo: c.protocolo, url_stream: c.protocolo === "http" ? c.url_stream : "" });
+    setForm({
+      ...EMPTY_FORM, nome: c.nome, protocolo: c.protocolo, modo_conexao: c.modo_conexao,
+      url_stream: c.protocolo === "http" ? c.url_stream : "",
+    });
     setShowModal(true);
   };
 
@@ -87,23 +100,31 @@ export function CameraManagement() {
     try {
       const payload = form.protocolo === "rtsp"
         ? {
-            nome: form.nome, protocolo: "rtsp",
+            nome: form.nome, protocolo: "rtsp", modo_conexao: form.modo_conexao,
             rtsp_ip: form.rtsp_ip.trim(), rtsp_porta: form.rtsp_porta,
             rtsp_usuario: form.rtsp_usuario || "admin", rtsp_chave: form.rtsp_chave,
             rtsp_canal: form.rtsp_canal, rtsp_subtipo: form.rtsp_subtipo,
           }
-        : { nome: form.nome, protocolo: "http", url_stream: form.url_stream.trim() };
+        : { nome: form.nome, protocolo: "http", modo_conexao: "pull", url_stream: form.url_stream.trim() };
 
+      let saved: Camera;
       if (editing) {
         const { data } = await api.put<Camera>(`/api/cameras/${editing.id}`, payload);
+        saved = data;
         setCameras((prev) => prev.map((c) => (c.id === editing.id ? data : c)));
         toast.success("Câmera atualizada!");
       } else {
         const { data } = await api.post<Camera>("/api/cameras", payload);
+        saved = data;
         setCameras((prev) => [data, ...prev]);
         toast.success("Câmera cadastrada!");
       }
       setShowModal(false);
+
+      if (form.protocolo === "rtsp" && form.modo_conexao === "push") {
+        const cmd = `.\\scripts\\bridge-camera-online.ps1 -RtspUrl "${montarRtspUrl(form)}" -CameraId ${saved.id} -ApiUrl "${API_URL || window.location.origin}" -ApiKey "SUA_HARDWARE_API_KEY"`;
+        setBridgeCommand(cmd);
+      }
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Falha ao salvar câmera"));
     } finally {
@@ -162,6 +183,9 @@ export function CameraManagement() {
                 <span className="text-xs bg-[#2E7D32]/10 text-[#2E7D32] px-2 py-0.5 rounded-full font-medium uppercase">
                   {c.protocolo}
                 </span>
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
+                  {c.modo_conexao === "push" ? "ponte local" : "acesso direto"}
+                </span>
                 {previewId === c.id && (
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${previewStatus === "ativa" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
                     {previewStatus === "ativa" ? "ao vivo" : "conectando..."}
@@ -182,7 +206,11 @@ export function CameraManagement() {
             </div>
             <div className="aspect-video bg-gray-900 flex items-center justify-center overflow-hidden">
               {previewId === c.id ? (
-                <CameraLivePreview cameraId={c.id} onStatusChange={setPreviewStatus} />
+                c.modo_conexao === "push" ? (
+                  <CameraPushPreview cameraId={c.id} onStatusChange={setPreviewStatus} />
+                ) : (
+                  <CameraLivePreview cameraId={c.id} onStatusChange={setPreviewStatus} />
+                )
               ) : (
                 <div className="text-center text-gray-500 p-6">
                   <CameraIcon className="w-10 h-10 mx-auto mb-2 opacity-30" />
@@ -224,6 +252,31 @@ export function CameraManagement() {
 
               {form.protocolo === "rtsp" ? (
                 <>
+                  <div>
+                    <label className="block text-sm font-medium text-[#424242] mb-1.5">Onde a câmera está?</label>
+                    <div className="grid grid-cols-1 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, modo_conexao: "push" }))}
+                        className={`text-left px-3 py-2.5 rounded-lg text-sm border transition-colors ${form.modo_conexao === "push" ? "bg-[#2E7D32] text-white border-[#2E7D32]" : "bg-[#F5F5F5] text-[#424242] border-transparent"}`}
+                      >
+                        <span className="font-medium">Rede diferente do servidor (recomendado p/ Azure)</span>
+                        <span className={`block text-xs mt-0.5 ${form.modo_conexao === "push" ? "text-white/80" : "text-[#717182]"}`}>
+                          Uma ponte local envia as fotos pro servidor — não precisa VPN nem porta aberta.
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, modo_conexao: "pull" }))}
+                        className={`text-left px-3 py-2.5 rounded-lg text-sm border transition-colors ${form.modo_conexao === "pull" ? "bg-[#2E7D32] text-white border-[#2E7D32]" : "bg-[#F5F5F5] text-[#424242] border-transparent"}`}
+                      >
+                        <span className="font-medium">Mesma rede do servidor</span>
+                        <span className={`block text-xs mt-0.5 ${form.modo_conexao === "pull" ? "text-white/80" : "text-[#717182]"}`}>
+                          O servidor acessa a câmera direto (ex: testando local, ou servidor na sua VPS/rede).
+                        </span>
+                      </button>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-sm font-medium text-[#424242] mb-1.5">IP da Câmera <span className="text-red-500">*</span></label>
@@ -272,7 +325,10 @@ export function CameraManagement() {
                     </div>
                   </div>
                   <p className="text-xs text-[#717182] -mt-2 flex items-center gap-1">
-                    <Wifi className="w-3 h-3" /> A câmera precisa estar na mesma rede do servidor, com IP fixo configurado no app Mibo.
+                    <Wifi className="w-3 h-3" />
+                    {form.modo_conexao === "push"
+                      ? "Depois de salvar, você vai receber o comando pra rodar a ponte local (PC na mesma rede da câmera)."
+                      : "A câmera precisa estar na mesma rede do servidor, com IP fixo configurado no app Mibo."}
                   </p>
                 </>
               ) : (
@@ -291,6 +347,40 @@ export function CameraManagement() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {bridgeCommand && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setBridgeCommand(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-[#424242]">Rode a ponte local</h2>
+              <button onClick={() => setBridgeCommand(null)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
+                <X className="w-5 h-5 text-[#717182]" />
+              </button>
+            </div>
+            <p className="text-sm text-[#717182] mb-3">
+              Abra o PowerShell num PC/notebook que esteja na <strong>mesma rede Wi-Fi da câmera</strong>, dentro da pasta do projeto, troque <code>SUA_HARDWARE_API_KEY</code> pela chave configurada no servidor (<code>HARDWARE_API_KEY</code>) e rode:
+            </p>
+            <div className="relative">
+              <pre className="bg-gray-900 text-green-400 text-xs p-4 rounded-lg overflow-x-auto whitespace-pre-wrap break-all">{bridgeCommand}</pre>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(bridgeCommand);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="absolute top-2 right-2 p-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-white"
+                title="Copiar"
+              >
+                {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-[#717182] mt-3">
+              Deixe essa janela do PowerShell aberta enquanto quiser a câmera ao vivo no site. Depois volte aqui e clique no ícone de olho pra ver.
+            </p>
           </div>
         </div>
       )}
