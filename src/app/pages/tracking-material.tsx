@@ -1,7 +1,18 @@
 ﻿import { useState, useEffect } from "react";
-import { Factory, Package, Warehouse, Recycle, Trash2, ArrowRight, Brain, RefreshCw } from "lucide-react";
+import { Factory, Package, Warehouse, Recycle, Trash2, ArrowRight, Brain, RefreshCw, ScanLine, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
+
+interface Validacao {
+  id: number;
+  resultado: "aprovado" | "reprovado";
+  motivo_divergencia: string | null;
+  peso_medido: number | null;
+  qrcode_lido: string | null;
+  produto_nome: string | null;
+  produto_sku: string | null;
+  criado_em: string;
+}
 
 interface Residuo {
   id: number;
@@ -43,7 +54,9 @@ const DESTINO_LABEL: Record<string, string> = {
 };
 
 export function TrackingMaterial() {
+  const [tab, setTab] = useState<"validacoes" | "residuos">("validacoes");
   const [residuos, setResiduos] = useState<Residuo[]>([]);
+  const [validacoes, setValidacoes] = useState<Validacao[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { loadData(); }, []);
@@ -51,8 +64,12 @@ export function TrackingMaterial() {
   async function loadData() {
     setLoading(true);
     try {
-      const { data } = await api.get<Residuo[]>("/api/residuos");
-      setResiduos(data);
+      const [r, v] = await Promise.all([
+        api.get<Residuo[]>("/api/residuos"),
+        api.get<Validacao[]>("/api/validacoes"),
+      ]);
+      setResiduos(r.data);
+      setValidacoes(v.data);
     } catch {
       toast.error("Falha ao carregar rastreamento");
     } finally {
@@ -64,12 +81,15 @@ export function TrackingMaterial() {
   const reaproveitados = residuos.filter((r) => r.status === "reaproveitamento").length;
   const iaDetectados   = residuos.filter((r) => r.analise_ia_id).length;
 
+  const aprovadas = validacoes.filter((v) => v.resultado === "aprovado").length;
+  const reprovadas = validacoes.filter((v) => v.resultado === "reprovado").length;
+
   return (
     <div className="p-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-[#424242] mb-1">Rastreamento de Material</h1>
+          <h1 className="text-3xl font-bold text-[#424242] mb-1">Rastreamento</h1>
           <p className="text-[#717182]">Visualize o fluxo da logística reversa</p>
         </div>
         <button
@@ -81,6 +101,123 @@ export function TrackingMaterial() {
         </button>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-2 mb-8 bg-white rounded-xl border border-gray-100 p-1.5 w-fit">
+        <button
+          onClick={() => setTab("validacoes")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+            tab === "validacoes" ? "bg-[#2E7D32] text-white" : "text-[#717182] hover:bg-gray-50"
+          }`}
+        >
+          <ScanLine className="w-4 h-4" /> Validações de Expedição
+        </button>
+        <button
+          onClick={() => setTab("residuos")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+            tab === "residuos" ? "bg-[#2E7D32] text-white" : "text-[#717182] hover:bg-gray-50"
+          }`}
+        >
+          <Recycle className="w-4 h-4" /> Resíduos
+        </button>
+      </div>
+
+      {tab === "validacoes" && (
+        <>
+          {/* Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 flex items-center gap-4">
+              <div className="bg-[#2E7D32]/10 p-3 rounded-xl">
+                <ScanLine className="w-6 h-6 text-[#2E7D32]" />
+              </div>
+              <div>
+                <p className="text-sm text-[#717182]">Total Validado</p>
+                <p className="text-2xl font-bold text-[#424242]">{validacoes.length} <span className="text-base font-normal text-[#717182]">itens</span></p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 flex items-center gap-4">
+              <div className="bg-green-100 p-3 rounded-xl">
+                <CheckCircle2 className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm text-[#717182]">Aprovados</p>
+                <p className="text-2xl font-bold text-[#424242]">{aprovadas}</p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 flex items-center gap-4">
+              <div className="bg-red-100 p-3 rounded-xl">
+                <XCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <div>
+                <p className="text-sm text-[#717182]">Reprovados</p>
+                <p className="text-2xl font-bold text-[#424242]">{reprovadas}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-semibold text-[#424242]">
+                Histórico de Validações
+                <span className="ml-2 text-sm font-normal text-[#717182]">({validacoes.length} registros)</span>
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-[#F5F5F5]">
+                  <tr>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">ID</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Produto</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">QR Lido</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Peso (kg)</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Resultado</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Motivo</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Data</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {loading ? (
+                    Array.from({ length: 5 }).map((_, i) => (
+                      <tr key={i}>
+                        {Array.from({ length: 7 }).map((__, j) => (
+                          <td key={j} className="px-6 py-4"><div className="h-4 bg-gray-100 rounded animate-pulse" /></td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : validacoes.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-12 text-[#717182]">
+                        Nenhuma validação registrada ainda. Use a página "Posto de Validação" para começar.
+                      </td>
+                    </tr>
+                  ) : (
+                    validacoes.map((v) => (
+                      <tr key={v.id} className="hover:bg-[#F5F5F5]/50 transition-colors">
+                        <td className="px-6 py-4"><span className="font-mono text-sm text-[#717182]">#{String(v.id).padStart(4, "0")}</span></td>
+                        <td className="px-6 py-4">
+                          <p className="text-sm font-semibold text-[#424242]">{v.produto_nome || "—"}</p>
+                          {v.produto_sku && <p className="text-xs text-[#717182]">{v.produto_sku}</p>}
+                        </td>
+                        <td className="px-6 py-4"><span className="font-mono text-xs text-[#717182] break-all">{v.qrcode_lido || "—"}</span></td>
+                        <td className="px-6 py-4"><span className="text-sm font-medium text-[#424242]">{v.peso_medido?.toFixed(3) ?? "—"}</span></td>
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${v.resultado === "aprovado" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
+                            {v.resultado === "aprovado" ? "Aprovado" : "Reprovado"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4"><span className="text-xs text-[#717182]">{v.motivo_divergencia || "—"}</span></td>
+                        <td className="px-6 py-4"><span className="text-sm text-[#717182]">{v.criado_em ? new Date(v.criado_em).toLocaleString("pt-BR") : "—"}</span></td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab === "residuos" && (
+        <>
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 flex items-center gap-4">
@@ -233,6 +370,8 @@ export function TrackingMaterial() {
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

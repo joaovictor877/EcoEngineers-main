@@ -1,8 +1,10 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { Login } from "./pages/login";
 import { Dashboard } from "./pages/dashboard";
+import { ValidationStation } from "./pages/validation-station";
 import { RegisterWaste } from "./pages/register-waste";
 import { TrackingMaterial } from "./pages/tracking-material";
+import { ProductManagement } from "./pages/product-management";
 import { MaterialManagement } from "./pages/material-management";
 import { Reports } from "./pages/reports";
 import { Settings } from "./pages/settings";
@@ -44,12 +46,20 @@ export const router = createBrowserRouter([
     children: [
       { index: true, Component: Dashboard },
       {
+        path: "validation-station",
+        Component: () => <RequireRole path="/validation-station"><ValidationStation /></RequireRole>,
+      },
+      {
         path: "register-waste",
         Component: () => <RequireRole path="/register-waste"><RegisterWaste /></RequireRole>,
       },
       {
         path: "tracking",
         Component: () => <RequireRole path="/tracking"><TrackingMaterial /></RequireRole>,
+      },
+      {
+        path: "products",
+        Component: () => <RequireRole path="/products"><ProductManagement /></RequireRole>,
       },
       {
         path: "materials",

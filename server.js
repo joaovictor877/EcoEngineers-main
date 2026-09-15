@@ -278,12 +278,16 @@ if (hasFrontendBuild) {
 app.use('/uploads', express.static(getUploadsDir()));
 
 // Rotas estendidas — Hardware, IA, Câmeras
-const hardwareRoutes = require('./routes/hardwareRoutes')(dbQuery, dbClient, io, authMiddleware);
-const aiRoutes       = require('./routes/aiRoutes')(dbQuery, dbClient, io, authMiddleware);
-const cameraRoutes   = require('./routes/cameraRoutes')(dbQuery, dbClient, io, authMiddleware);
-app.use('/api/hardware', hardwareRoutes);
-app.use('/api/ia',       aiRoutes);
-app.use('/api/cameras',  cameraRoutes);
+const hardwareRoutes   = require('./routes/hardwareRoutes')(dbQuery, dbClient, io, authMiddleware);
+const aiRoutes         = require('./routes/aiRoutes')(dbQuery, dbClient, io, authMiddleware);
+const cameraRoutes     = require('./routes/cameraRoutes')(dbQuery, dbClient, io, authMiddleware);
+const validationRoutes = require('./routes/validationRoutes')(dbQuery, dbClient, io, authMiddleware);
+const productRoutes    = require('./routes/productRoutes')(dbQuery, dbClient, io, authMiddleware);
+app.use('/api/hardware',   hardwareRoutes);
+app.use('/api/ia',         aiRoutes);
+app.use('/api/cameras',    cameraRoutes);
+app.use('/api/validacoes', validationRoutes);
+app.use('/api',             productRoutes);
 
 // Dashboard IA stats
 app.get('/api/dashboard/stats/ia', authMiddleware, async (req, res) => {
@@ -536,6 +540,7 @@ const port = process.env.PORT || 4000;
 async function start() {
   try {
     await dbQuery('SELECT 1');
+    require('./services/mqttService').start(dbQuery, io);
     httpServer.listen(port, () => console.log(`[EcoEngineers] Server running on :${port} | db=${dbClient} schema=${dbSchema} | Socket.IO enabled`));
   } catch (err) {
     console.error('Failed to connect to database on startup:', err.message);

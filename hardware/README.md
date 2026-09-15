@@ -92,3 +92,22 @@ Para zerar a balanca pelo script, deixe ela vazia e use:
 ```
 
 Se o valor ficar errado, ajuste `CALIBRATION_FACTOR` ate bater com um peso conhecido.
+
+## 4. Quando o modulo LoRa + gateway chegar
+
+O mapa mental do posto de validacao prevê `Balanca/Camera -> Microcontrolador -> Modulo LoRa
+-> Gateway -> Broker MQTT -> Backend`. Esse caminho ainda depende de hardware fisico que o
+projeto nao tem em maos hoje, entao o fluxo atual (Wi-Fi HTTP direto do ESP32, ou Arduino UNO
+via USB + `bridge-hx711-online.ps1`) continua sendo o caminho valido para testes e demonstracao.
+
+Quando o gateway LoRa estiver disponivel, o backend ja tem um adaptador pronto em
+`services/mqttService.js`: basta configurar a variavel de ambiente `MQTT_BROKER_URL` (e
+`MQTT_USERNAME`/`MQTT_PASSWORD` se o broker exigir) e o gateway passar a publicar nos topicos:
+
+```text
+postos/<posto_id>/peso       -> { "peso": 2.45, "dispositivo": "Posto 01" }
+postos/<posto_id>/validacao  -> payload livre
+```
+
+Sem essa variavel definida, o adaptador MQTT fica desativado e nao muda nada do
+comportamento atual.

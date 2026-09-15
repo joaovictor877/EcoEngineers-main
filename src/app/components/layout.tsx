@@ -9,18 +9,22 @@ import {
   Recycle,
   Menu,
   X,
+  ScanLine,
+  Tags,
 } from "lucide-react";
 import { useState } from "react";
 import { useCurrentUser, canAccess } from "../lib/useCurrentUser";
 import { PageHeader } from "./page-header";
 
 const ALL_NAV = [
-  { path: "/",               label: "Dashboard",           icon: LayoutDashboard },
-  { path: "/register-waste", label: "Registrar Resíduo",   icon: FileInput       },
-  { path: "/tracking",       label: "Rastreamento",        icon: Route           },
-  { path: "/materials",      label: "Gestão de Materiais", icon: Package         },
-  { path: "/reports",        label: "Relatórios",          icon: FileText        },
-  { path: "/settings",       label: "Configurações",       icon: Settings        },
+  { path: "/",                  label: "Dashboard",             icon: LayoutDashboard },
+  { path: "/validation-station",label: "Posto de Validação",    icon: ScanLine        },
+  { path: "/register-waste",    label: "Registrar Resíduo",     icon: FileInput       },
+  { path: "/tracking",          label: "Rastreamento",          icon: Route           },
+  { path: "/products",          label: "Produtos & Etiquetas",  icon: Tags            },
+  { path: "/materials",         label: "Gestão de Materiais",   icon: Package         },
+  { path: "/reports",           label: "Relatórios",            icon: FileText        },
+  { path: "/settings",          label: "Configurações",         icon: Settings        },
 ];
 
 export function Layout() {

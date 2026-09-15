@@ -1,13 +1,15 @@
 import { useState, useEffect } from "react";
-import { 
-  TrendingUp, 
-  Recycle, 
-  DollarSign, 
+import {
+  TrendingUp,
+  Recycle,
+  DollarSign,
   Leaf,
   Brain,
   Activity,
   CheckCircle,
-  Cpu
+  Cpu,
+  ScanLine,
+  XCircle,
 } from "lucide-react";
 import {
   PieChart,
@@ -37,6 +39,13 @@ interface IaStats {
   por_material: { material_detectado: string; quantidade: number }[];
 }
 
+interface ValidacaoStats {
+  total: number;
+  aprovadas: number;
+  reprovadas: number;
+  taxa_aprovacao: number;
+}
+
 const COLORS = ["#2E7D32", "#66BB6A", "#81C784", "#A5D6A7", "#C8E6C9", "#F9A825", "#0288D1", "#7B1FA2"];
 
 function fmt(v: number | null | undefined) {
@@ -48,6 +57,7 @@ function fmt(v: number | null | undefined) {
 export function Dashboard() {
   const [stats, setStats] = useState<DashStats | null>(null);
   const [iaStats, setIaStats] = useState<IaStats | null>(null);
+  const [validacaoStats, setValidacaoStats] = useState<ValidacaoStats | null>(null);
 
   useEffect(() => {
     api.get<DashStats>("/api/dashboard/stats")
@@ -55,6 +65,9 @@ export function Dashboard() {
       .catch(() => {/* silently keep null */});
     api.get<IaStats>("/api/dashboard/stats/ia")
       .then((r) => setIaStats(r.data))
+      .catch(() => {});
+    api.get<ValidacaoStats>("/api/validacoes/stats")
+      .then((r) => setValidacaoStats(r.data))
       .catch(() => {});
   }, []);
 
@@ -82,6 +95,40 @@ export function Dashboard() {
         <p className="text-sm lg:text-base text-[#717182]">
           Indicadores de sustentabilidade e gestão de resíduos
         </p>
+      </div>
+
+      {/* Posto de Validação */}
+      <div className="mb-6 lg:mb-8">
+        <div className="flex items-center gap-2 mb-4">
+          <ScanLine className="w-6 h-6 text-[#2E7D32]" />
+          <h2 className="text-xl font-bold text-[#424242]">Posto de Validação</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
+          <StatCard
+            title="Itens Validados"
+            value={String(validacaoStats?.total ?? 0)}
+            icon={ScanLine}
+            trend={validacaoStats?.total ? "Total no posto" : "Aguardando dados"}
+            trendUp={true}
+            iconColor="bg-blue-100 text-blue-700"
+          />
+          <StatCard
+            title="Taxa de Aprovação"
+            value={`${validacaoStats?.taxa_aprovacao ?? 0}%`}
+            icon={CheckCircle}
+            trend={`${validacaoStats?.aprovadas ?? 0} aprovados`}
+            trendUp={true}
+            iconColor="bg-green-100 text-green-700"
+          />
+          <StatCard
+            title="Reprovações"
+            value={String(validacaoStats?.reprovadas ?? 0)}
+            icon={XCircle}
+            trend="Divergência peso/QR/imagem"
+            trendUp={false}
+            iconColor="bg-red-100 text-red-700"
+          />
+        </div>
       </div>
 
       {/* KPI Cards */}
