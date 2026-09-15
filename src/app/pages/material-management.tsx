@@ -8,6 +8,8 @@ interface Material {
   name: string;
   category: string;
   unit: string;
+  valor_unitario_kg: number;
+  custo_reaproveitamento_kg: number;
   created_at: string;
 }
 
@@ -47,7 +49,7 @@ export function MaterialManagement() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Material | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", category: "Metal Ferroso", unit: "kg" });
+  const [form, setForm] = useState({ name: "", category: "Metal Ferroso", unit: "kg", valor_unitario_kg: "", custo_reaproveitamento_kg: "" });
 
   useEffect(() => { loadMaterials(); }, []);
 
@@ -71,13 +73,16 @@ export function MaterialManagement() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", category: "Metal Ferroso", unit: "kg" });
+    setForm({ name: "", category: "Metal Ferroso", unit: "kg", valor_unitario_kg: "", custo_reaproveitamento_kg: "" });
     setShowModal(true);
   };
 
   const openEdit = (m: Material) => {
     setEditing(m);
-    setForm({ name: m.name, category: m.category || "Metal Ferroso", unit: m.unit || "kg" });
+    setForm({
+      name: m.name, category: m.category || "Metal Ferroso", unit: m.unit || "kg",
+      valor_unitario_kg: String(m.valor_unitario_kg ?? ""), custo_reaproveitamento_kg: String(m.custo_reaproveitamento_kg ?? ""),
+    });
     setShowModal(true);
   };
 
@@ -85,13 +90,18 @@ export function MaterialManagement() {
     e.preventDefault();
     if (!form.name.trim()) { toast.error("Nome é obrigatório"); return; }
     setSaving(true);
+    const payload = {
+      ...form,
+      valor_unitario_kg: Number(form.valor_unitario_kg.replace(",", ".")) || 0,
+      custo_reaproveitamento_kg: Number(form.custo_reaproveitamento_kg.replace(",", ".")) || 0,
+    };
     try {
       if (editing) {
-        const { data } = await api.put<Material>(`/api/materials/${editing.id}`, form);
+        const { data } = await api.put<Material>(`/api/materials/${editing.id}`, payload);
         setMaterials((prev) => prev.map((m) => (m.id === editing.id ? data : m)));
         toast.success("Material atualizado com sucesso!");
       } else {
-        const { data } = await api.post<Material>("/api/materials", form);
+        const { data } = await api.post<Material>("/api/materials", payload);
         setMaterials((prev) => [...prev, data]);
         toast.success("Material adicionado com sucesso!");
       }
@@ -210,6 +220,8 @@ export function MaterialManagement() {
                 <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Nome do Material</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Categoria</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Unidade</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Valor de Mercado</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Custo Reaproveitamento</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Data de Cadastro</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Ações</th>
               </tr>
@@ -218,7 +230,7 @@ export function MaterialManagement() {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 6 }).map((__, j) => (
+                    {Array.from({ length: 8 }).map((__, j) => (
                       <td key={j} className="px-6 py-4">
                         <div className="h-4 bg-gray-100 rounded animate-pulse" />
                       </td>
@@ -227,7 +239,7 @@ export function MaterialManagement() {
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-12 text-[#717182]">
+                  <td colSpan={8} className="text-center py-12 text-[#717182]">
                     {searchTerm ? "Nenhum material encontrado para a busca." : "Nenhum material cadastrado. Clique em \"Adicionar Material\" para começar."}
                   </td>
                 </tr>
@@ -251,6 +263,12 @@ export function MaterialManagement() {
                       <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#2E7D32]/10 text-[#2E7D32]">
                         {m.unit || "kg"}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-[#424242]">
+                      R$ {Number(m.valor_unitario_kg || 0).toFixed(2)}/kg
+                    </td>
+                    <td className="px-6 py-4 text-sm text-[#424242]">
+                      R$ {Number(m.custo_reaproveitamento_kg || 0).toFixed(2)}/kg
                     </td>
                     <td className="px-6 py-4 text-sm text-[#717182]">
                       {m.created_at ? new Date(m.created_at).toLocaleDateString("pt-BR") : "—"}
@@ -351,6 +369,39 @@ export function MaterialManagement() {
                   ))}
                 </select>
               </div>
+
+              {/* Economia por reaproveitamento */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-[#424242] mb-1.5">
+                    Valor de Mercado (R$/kg)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={form.valor_unitario_kg}
+                    onChange={(e) => setForm((f) => ({ ...f, valor_unitario_kg: e.target.value }))}
+                    placeholder="0,00"
+                    className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-[#2E7D32] focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/20 transition-all text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#424242] mb-1.5">
+                    Custo de Reaproveitamento (R$/kg)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={form.custo_reaproveitamento_kg}
+                    onChange={(e) => setForm((f) => ({ ...f, custo_reaproveitamento_kg: e.target.value }))}
+                    placeholder="0,00"
+                    className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-[#2E7D32] focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/20 transition-all text-sm"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-[#717182] -mt-2">
+                Usados para calcular prejuízo no descarte e economia líquida no reaproveitamento (registro de resíduos).
+              </p>
 
               {/* Preview badge */}
               {form.category && (

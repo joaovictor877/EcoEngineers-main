@@ -24,6 +24,9 @@ interface Residuo {
   status: string;
   observacao: string;
   analise_ia_id: number | null;
+  prejuizo_descarte: number;
+  custo_reaproveitamento: number;
+  valor_economizado: number;
   criado_em: string;
 }
 
@@ -297,6 +300,7 @@ export function TrackingMaterial() {
                 <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Status</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Destino</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">IA</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Impacto Financeiro</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Data</th>
               </tr>
             </thead>
@@ -304,7 +308,7 @@ export function TrackingMaterial() {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 8 }).map((__, j) => (
+                    {Array.from({ length: 9 }).map((__, j) => (
                       <td key={j} className="px-6 py-4">
                         <div className="h-4 bg-gray-100 rounded animate-pulse" />
                       </td>
@@ -313,7 +317,7 @@ export function TrackingMaterial() {
                 ))
               ) : residuos.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-[#717182]">
+                  <td colSpan={9} className="text-center py-12 text-[#717182]">
                     Nenhum resíduo registrado ainda. Use a página “Registro de Resíduos” para começar.
                   </td>
                 </tr>
@@ -356,6 +360,19 @@ export function TrackingMaterial() {
                         </span>
                       ) : (
                         <span className="text-xs text-gray-400">Manual</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {r.destino === "descarte" && Number(r.prejuizo_descarte) > 0 ? (
+                        <span className="text-sm font-medium text-red-600">
+                          − R$ {Number(r.prejuizo_descarte).toFixed(2)}
+                        </span>
+                      ) : Number(r.valor_economizado) !== 0 ? (
+                        <span className="text-sm font-medium text-green-600">
+                          + R$ {Number(r.valor_economizado).toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
                       )}
                     </td>
                     <td className="px-6 py-4">

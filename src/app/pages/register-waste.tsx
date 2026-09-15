@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Camera, Save, Wifi, Cpu, Activity, Brain,
-  RefreshCw, CheckCircle, Zap, AlertCircle,
+  RefreshCw, CheckCircle, Zap, AlertCircle, DollarSign, TrendingDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import api, { API_URL } from "../lib/api";
@@ -40,6 +40,8 @@ interface Material {
   name: string;
   category: string;
   unit: string;
+  valor_unitario_kg: number;
+  custo_reaproveitamento_kg: number;
 }
 
 export function RegisterWaste() {
@@ -250,6 +252,18 @@ export function RegisterWaste() {
       setIsSubmitting(false);
     }
   };
+
+  const selectedMaterial = materialsList.find((m) => String(m.id) === formData.material_id) || null;
+  const impactoFinanceiro = (() => {
+    const pesoNum = parseWeightKg(formData.weight);
+    if (!selectedMaterial || !formData.destination || !Number.isFinite(pesoNum) || pesoNum <= 0) return null;
+    const valorKg = Number(selectedMaterial.valor_unitario_kg) || 0;
+    const custoKg = Number(selectedMaterial.custo_reaproveitamento_kg) || 0;
+    if (formData.destination === "descarte") {
+      return { tipo: "prejuizo" as const, valor: pesoNum * valorKg };
+    }
+    return { tipo: "economia" as const, valor: pesoNum * (valorKg - custoKg), custo: pesoNum * custoKg };
+  })();
 
   const inputClass = (highlighted = false) =>
     `w-full px-4 py-3 rounded-lg border focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/20 transition-all ${
@@ -496,6 +510,27 @@ export function RegisterWaste() {
                   </select>
                 </div>
               </div>
+
+              {impactoFinanceiro && (
+                impactoFinanceiro.tipo === "prejuizo" ? (
+                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-red-700">
+                    <TrendingDown className="w-5 h-5 flex-shrink-0" />
+                    <p className="text-sm">
+                      Prejuízo estimado com o descarte: <span className="font-bold">R$ {impactoFinanceiro.valor.toFixed(2)}</span>
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-green-50 border border-green-200 text-green-700">
+                    <DollarSign className="w-5 h-5 flex-shrink-0" />
+                    <p className="text-sm">
+                      Economia líquida estimada: <span className="font-bold">R$ {impactoFinanceiro.valor.toFixed(2)}</span>
+                      {impactoFinanceiro.custo !== undefined && (
+                        <span className="text-green-600/80"> (custo de reaproveitamento: R$ {impactoFinanceiro.custo.toFixed(2)})</span>
+                      )}
+                    </p>
+                  </div>
+                )
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-[#424242] mb-2">Data</label>

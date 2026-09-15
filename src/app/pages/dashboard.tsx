@@ -10,6 +10,8 @@ import {
   Cpu,
   ScanLine,
   XCircle,
+  TrendingDown,
+  Wallet,
 } from "lucide-react";
 import {
   PieChart,
@@ -30,6 +32,9 @@ interface DashStats {
   total_kg: number;
   reused_kg: number;
   by_material: { name: string; total: number }[];
+  prejuizo_descarte_total: number;
+  custo_reaproveitamento_total: number;
+  economia_reaproveitamento_total: number;
 }
 
 interface IaStats {
@@ -73,8 +78,13 @@ export function Dashboard() {
 
   const totalKg  = stats?.total_kg  ?? 0;
   const reusedKg = stats?.reused_kg ?? 0;
-  const savingsR$ = (reusedKg * 2.5).toFixed(0); // R$2.50/kg estimate
   const reuseRate = totalKg > 0 ? ((reusedKg / totalKg) * 100).toFixed(0) : "0";
+
+  const prejuizoDescarte = stats?.prejuizo_descarte_total ?? 0;
+  const custoReaproveitamento = stats?.custo_reaproveitamento_total ?? 0;
+  const economiaReaproveitamento = stats?.economia_reaproveitamento_total ?? 0;
+
+  const fmtR$ = (v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const materialPieData = (stats?.by_material ?? []).slice(0, 6).map((m, i) => ({
     name: m.name, value: Math.round(Number(m.total)), color: COLORS[i % COLORS.length],
@@ -150,9 +160,9 @@ export function Dashboard() {
         />
         <StatCard
           title="Economia Gerada"
-          value={`R$ ${Number(savingsR$).toLocaleString("pt-BR")}`}
+          value={fmtR$(economiaReaproveitamento)}
           icon={DollarSign}
-          trend="Estimativa"
+          trend="Economia líquida do reaproveitamento"
           trendUp={true}
         />
         <StatCard
@@ -163,6 +173,40 @@ export function Dashboard() {
           trendUp={true}
           iconColor="bg-[#66BB6A]/10 text-[#66BB6A]"
         />
+      </div>
+
+      {/* Impacto Financeiro */}
+      <div className="mb-6 lg:mb-8">
+        <div className="flex items-center gap-2 mb-4">
+          <Wallet className="w-6 h-6 text-[#2E7D32]" />
+          <h2 className="text-xl font-bold text-[#424242]">Impacto Financeiro do Reaproveitamento</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
+          <StatCard
+            title="Prejuízo por Descarte"
+            value={fmtR$(prejuizoDescarte)}
+            icon={TrendingDown}
+            trend="Valor perdido ao descartar peças"
+            trendUp={false}
+            iconColor="bg-red-100 text-red-700"
+          />
+          <StatCard
+            title="Custo de Reaproveitamento"
+            value={fmtR$(custoReaproveitamento)}
+            icon={Wallet}
+            trend="Investido em reprocessar material"
+            trendUp={true}
+            iconColor="bg-orange-100 text-orange-700"
+          />
+          <StatCard
+            title="Economia Líquida"
+            value={fmtR$(economiaReaproveitamento)}
+            icon={DollarSign}
+            trend="Valor de mercado − custo de reaproveitamento"
+            trendUp={true}
+            iconColor="bg-green-100 text-green-700"
+          />
+        </div>
       </div>
 
       {/* Charts */}

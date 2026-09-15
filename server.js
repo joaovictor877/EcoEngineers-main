@@ -177,13 +177,21 @@ app.get('/api/materials', authMiddleware, async (req, res) => {
 
 app.post('/api/materials', authMiddleware, async (req, res) => {
   try {
-    const { name, category, unit } = req.body;
+    const { name, category, unit, valor_unitario_kg, custo_reaproveitamento_kg } = req.body;
+    const valorKg = Number(valor_unitario_kg) || 0;
+    const custoKg = Number(custo_reaproveitamento_kg) || 0;
     if (dbClient === 'mysql') {
-      const insert = await dbQuery('INSERT INTO materials (name,category,unit) VALUES ($1,$2,$3)', [name, category, unit || 'kg']);
+      const insert = await dbQuery(
+        'INSERT INTO materials (name,category,unit,valor_unitario_kg,custo_reaproveitamento_kg) VALUES ($1,$2,$3,$4,$5)',
+        [name, category, unit || 'kg', valorKg, custoKg]
+      );
       const row = await dbQuery('SELECT * FROM materials WHERE id = $1', [insert.raw.insertId]);
       return res.json(row.rows[0]);
     }
-    const r = await dbQuery('INSERT INTO materials (name,category,unit) VALUES ($1,$2,$3) RETURNING *', [name, category, unit || 'kg']);
+    const r = await dbQuery(
+      'INSERT INTO materials (name,category,unit,valor_unitario_kg,custo_reaproveitamento_kg) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [name, category, unit || 'kg', valorKg, custoKg]
+    );
     res.json(r.rows[0]);
   } catch (err) {
     console.error(err);
@@ -196,9 +204,14 @@ app.put('/api/materials/:id', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
-    const { name, category, unit } = req.body;
+    const { name, category, unit, valor_unitario_kg, custo_reaproveitamento_kg } = req.body;
     if (!name) return res.status(400).json({ error: 'name é obrigatório' });
-    await dbQuery('UPDATE materials SET name=$1, category=$2, unit=$3 WHERE id=$4', [name, category || '', unit || 'kg', id]);
+    const valorKg = Number(valor_unitario_kg) || 0;
+    const custoKg = Number(custo_reaproveitamento_kg) || 0;
+    await dbQuery(
+      'UPDATE materials SET name=$1, category=$2, unit=$3, valor_unitario_kg=$4, custo_reaproveitamento_kg=$5 WHERE id=$6',
+      [name, category || '', unit || 'kg', valorKg, custoKg, id]
+    );
     const r = await dbQuery('SELECT * FROM materials WHERE id=$1', [id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Material não encontrado' });
     res.json(r.rows[0]);
@@ -254,7 +267,20 @@ app.get('/api/dashboard/stats', authMiddleware, async (req, res) => {
     const total = await dbQuery('SELECT COALESCE(SUM(quantity),0) as total FROM wastes');
     const reused = await dbQuery('SELECT COALESCE(SUM(quantity),0) as reused FROM wastes WHERE recovered = true');
     const by_material = await dbQuery('SELECT m.name, COALESCE(SUM(w.quantity),0) as total FROM materials m LEFT JOIN wastes w ON w.material_id = m.id GROUP BY m.name ORDER BY total DESC');
-    res.json({ total_kg: Number(total.rows[0].total), reused_kg: Number(reused.rows[0].reused), by_material: by_material.rows });
+    const economia = await dbQuery(
+      `SELECT COALESCE(SUM(prejuizo_descarte),0)      as prejuizo_descarte,
+              COALESCE(SUM(custo_reaproveitamento),0) as custo_reaproveitamento,
+              COALESCE(SUM(valor_economizado),0)      as valor_economizado
+       FROM registros_residuos`
+    );
+    res.json({
+      total_kg: Number(total.rows[0].total),
+      reused_kg: Number(reused.rows[0].reused),
+      by_material: by_material.rows,
+      prejuizo_descarte_total: Number(economia.rows[0].prejuizo_descarte),
+      custo_reaproveitamento_total: Number(economia.rows[0].custo_reaproveitamento),
+      economia_reaproveitamento_total: Number(economia.rows[0].valor_economizado),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to compute dashboard stats' });
@@ -317,11 +343,14 @@ app.post('/api/residuos', authMiddleware, async (req, res) => {
     if (!material_id) return res.status(400).json({ error: 'material_id é obrigatório' });
     if (!peso || Number(peso) <= 0) return res.status(400).json({ error: 'peso deve ser maior que zero' });
 
-    // Validate material exists (prevents FK violation)
-    const matCheck = await dbQuery('SELECT id FROM materials WHERE id = $1', [material_id]);
+    // Validate material exists (prevents FK violation) — also fetch its economics
+    const matCheck = await dbQuery('SELECT id, valor_unitario_kg, custo_reaproveitamento_kg FROM materials WHERE id = $1', [material_id]);
     if (!matCheck.rows || !matCheck.rows.length) {
       return res.status(400).json({ error: 'Material não encontrado' });
     }
+    const material = matCheck.rows[0];
+    const valorUnitarioKg = Number(material.valor_unitario_kg) || 0;
+    const custoReaproveitamentoKg = Number(material.custo_reaproveitamento_kg) || 0;
 
     // Validate analise_ia_id exists — if not, silently drop it to avoid FK violation
     if (analise_ia_id) {
@@ -337,10 +366,28 @@ app.post('/api/residuos', authMiddleware, async (req, res) => {
     const statusMap = { reaproveitamento: 'reaproveitamento', reciclagem: 'reaproveitamento', venda: 'reaproveitamento', descarte: 'descarte' };
     const rrStatus = statusMap[destino] || 'producao';
 
+    // Impacto financeiro: descarte gera prejuízo; reaproveitamento/reciclagem/venda geram
+    // custo de reprocessamento e uma economia líquida (valor de mercado - custo do reaproveitamento).
+    const pesoNum = Number(peso);
+    let prejuizoDescarte = 0;
+    let custoReaproveitamento = 0;
+    let valorEconomizado = 0;
+    if (destino === 'descarte') {
+      prejuizoDescarte = pesoNum * valorUnitarioKg;
+    } else if (recovered) {
+      custoReaproveitamento = pesoNum * custoReaproveitamentoKg;
+      valorEconomizado = pesoNum * (valorUnitarioKg - custoReaproveitamentoKg);
+    }
+    const wasteValue = destino === 'descarte' ? -prejuizoDescarte : valorEconomizado;
+
     // Helper: insert into registros_residuos with a given usuario_id (null-safe)
     const insertRR = (uid) => dbQuery(
-      'INSERT INTO registros_residuos (material_id, usuario_id, analise_ia_id, peso, setor_origem, destino, status, observacao) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
-      [material_id, uid, analise_ia_id || null, peso, setor_origem || '', destino || '', rrStatus, observacao || '']
+      `INSERT INTO registros_residuos
+         (material_id, usuario_id, analise_ia_id, peso, setor_origem, destino, status, observacao,
+          prejuizo_descarte, custo_reaproveitamento, valor_economizado)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [material_id, uid, analise_ia_id || null, peso, setor_origem || '', destino || '', rrStatus, observacao || '',
+       prejuizoDescarte, custoReaproveitamento, valorEconomizado]
     );
 
     if (dbClient === 'mysql') {
@@ -361,7 +408,7 @@ app.post('/api/residuos', authMiddleware, async (req, res) => {
       try {
         await dbQuery(
           'INSERT INTO wastes (user_id, material_id, quantity, location, recovered, value) VALUES ($1,$2,$3,$4,$5,$6)',
-          [req.user.id, material_id, peso, setor_origem || '', recovered, 0]
+          [req.user.id, material_id, peso, setor_origem || '', recovered, wasteValue]
         );
       } catch (_) { /* non-critical */ }
 
@@ -372,12 +419,16 @@ app.post('/api/residuos', authMiddleware, async (req, res) => {
       return res.json(row.rows[0]);
     }
     const rr = await dbQuery(
-      'INSERT INTO registros_residuos (material_id, usuario_id, analise_ia_id, peso, setor_origem, destino, status, observacao) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-      [material_id, req.user.id, analise_ia_id || null, peso, setor_origem || '', destino || '', rrStatus, observacao || '']
+      `INSERT INTO registros_residuos
+         (material_id, usuario_id, analise_ia_id, peso, setor_origem, destino, status, observacao,
+          prejuizo_descarte, custo_reaproveitamento, valor_economizado)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [material_id, req.user.id, analise_ia_id || null, peso, setor_origem || '', destino || '', rrStatus, observacao || '',
+       prejuizoDescarte, custoReaproveitamento, valorEconomizado]
     );
     await dbQuery(
       'INSERT INTO wastes (user_id, material_id, quantity, location, recovered, value) VALUES ($1,$2,$3,$4,$5,$6)',
-      [req.user.id, material_id, peso, setor_origem || '', recovered, 0]
+      [req.user.id, material_id, peso, setor_origem || '', recovered, wasteValue]
     );
     res.json(rr.rows[0]);
   } catch (err) {
@@ -422,7 +473,10 @@ function buildResiduosQuery(params) {
            COALESCE(ai.confianca,'')     AS confianca_ia,
            rr.criado_em,
            COALESCE(rr.observacao,'')   AS observacao,
-           COALESCE(u.name,'—')          AS usuario
+           COALESCE(u.name,'—')          AS usuario,
+           COALESCE(rr.prejuizo_descarte,0)      AS prejuizo_descarte,
+           COALESCE(rr.custo_reaproveitamento,0) AS custo_reaproveitamento,
+           COALESCE(rr.valor_economizado,0)      AS valor_economizado
     FROM registros_residuos rr
     LEFT JOIN materials m  ON rr.material_id  = m.id
     LEFT JOIN users u      ON rr.usuario_id   = u.id
@@ -443,12 +497,14 @@ app.get('/api/reports/export/csv', authMiddleware, async (req, res) => {
     const rows = r.rows;
 
     const HEADER = ['ID','Material','Categoria','Peso (kg)','Setor de Origem','Destino',
-                    'Status','Detectado por IA','Confiança IA (%)','Data','Observação','Usuário'];
+                    'Status','Detectado por IA','Confiança IA (%)','Data','Observação','Usuário',
+                    'Prejuízo Descarte (R$)','Custo Reaproveitamento (R$)','Economia Líquida (R$)'];
     const csvRows = rows.map((row) => [
       row.id, row.material_name, row.material_category, row.peso,
       row.setor_origem, row.destino, row.status, row.detectado_ia, row.confianca_ia,
       row.criado_em ? new Date(row.criado_em).toLocaleDateString('pt-BR') : '',
       row.observacao, row.usuario,
+      Number(row.prejuizo_descarte).toFixed(2), Number(row.custo_reaproveitamento).toFixed(2), Number(row.valor_economizado).toFixed(2),
     ].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';'));
 
     const csv = '\uFEFF' + [HEADER.join(';'), ...csvRows].join('\r\n');
@@ -489,6 +545,9 @@ app.get('/api/reports/export/excel', authMiddleware, async (req, res) => {
       { header: 'Data',            key: 'data',        width: 14 },
       { header: 'Observação',      key: 'obs',         width: 30 },
       { header: 'Usuário',         key: 'usuario',     width: 20 },
+      { header: 'Prejuízo Descarte (R$)',       key: 'prejuizo', width: 20 },
+      { header: 'Custo Reaproveitamento (R$)',  key: 'custo',    width: 22 },
+      { header: 'Economia Líquida (R$)',        key: 'economia', width: 20 },
     ];
 
     // Style header row
@@ -513,6 +572,9 @@ app.get('/api/reports/export/excel', authMiddleware, async (req, res) => {
         data:    row.criado_em ? new Date(row.criado_em).toLocaleDateString('pt-BR') : '',
         obs:     row.observacao,
         usuario: row.usuario,
+        prejuizo: parseFloat(row.prejuizo_descarte) || 0,
+        custo:    parseFloat(row.custo_reaproveitamento) || 0,
+        economia: parseFloat(row.valor_economizado) || 0,
       });
       if (idx % 2 === 1) {
         ws.getRow(idx + 2).eachCell((cell) => {
