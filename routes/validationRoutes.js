@@ -173,6 +173,64 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
     }
   });
 
+  // PUT /api/validacoes/:id/resolver — gestor/operador confirma que tratou
+  // uma reprovação (ex: corrigiu a embalagem) antes do envio seguir.
+  router.put('/:id/resolver', authMiddleware, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+    try {
+      await dbQuery(
+        'UPDATE validacoes SET resolvido = 1, resolvido_em = NOW(), resolvido_por = $1 WHERE id = $2',
+        [req.user.id, id]
+      );
+      const r = await dbQuery(
+        `SELECT v.*, p.nome AS produto_nome, p.sku AS produto_sku, e.codigo_qr
+         FROM validacoes v
+         LEFT JOIN produtos p ON v.produto_esperado_id = p.id
+         LEFT JOIN etiquetas e ON v.etiqueta_id = e.id
+         WHERE v.id = $1`,
+        [id]
+      );
+      if (!r.rows[0]) return res.status(404).json({ error: 'Validação não encontrada' });
+      io.emit('validacao_resolvida', r.rows[0]);
+      return res.json(r.rows[0]);
+    } catch (err) {
+      console.error('[Validacao] Erro ao resolver:', err.message);
+      return res.status(500).json({ error: 'Falha ao marcar validação como resolvida' });
+    }
+  });
+
+  // PUT /api/validacoes/:id/entregar — marca uma expedição aprovada como
+  // efetivamente entregue (status interno, sem confirmação externa).
+  router.put('/:id/entregar', authMiddleware, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+    try {
+      const existing = await dbQuery('SELECT resultado FROM validacoes WHERE id = $1', [id]);
+      if (!existing.rows[0]) return res.status(404).json({ error: 'Validação não encontrada' });
+      if (existing.rows[0].resultado !== 'aprovado') {
+        return res.status(400).json({ error: 'Só itens aprovados podem ser marcados como entregues' });
+      }
+      await dbQuery(
+        "UPDATE validacoes SET status_entrega = 'entregue', entregue_em = NOW(), entregue_por = $1 WHERE id = $2",
+        [req.user.id, id]
+      );
+      const r = await dbQuery(
+        `SELECT v.*, p.nome AS produto_nome, p.sku AS produto_sku, e.codigo_qr
+         FROM validacoes v
+         LEFT JOIN produtos p ON v.produto_esperado_id = p.id
+         LEFT JOIN etiquetas e ON v.etiqueta_id = e.id
+         WHERE v.id = $1`,
+        [id]
+      );
+      io.emit('validacao_entregue', r.rows[0]);
+      return res.json(r.rows[0]);
+    } catch (err) {
+      console.error('[Validacao] Erro ao marcar entrega:', err.message);
+      return res.status(500).json({ error: 'Falha ao marcar validação como entregue' });
+    }
+  });
+
   // GET /api/validacoes/postos — lista de postos de validação cadastrados
   router.get('/postos', authMiddleware, async (req, res) => {
     try {
@@ -209,18 +267,21 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
       const total     = await dbQuery('SELECT COUNT(*) as total FROM validacoes');
       const aprovadas = await dbQuery("SELECT COUNT(*) as total FROM validacoes WHERE resultado = 'aprovado'");
       const reprovadas = await dbQuery("SELECT COUNT(*) as total FROM validacoes WHERE resultado = 'reprovado'");
+      const abertas = await dbQuery("SELECT COUNT(*) as total FROM validacoes WHERE resultado = 'reprovado' AND resolvido = 0");
       const totalNum = Number(total.rows[0]?.total || 0);
       const aprovadasNum = Number(aprovadas.rows[0]?.total || 0);
       const reprovadasNum = Number(reprovadas.rows[0]?.total || 0);
+      const abertasNum = Number(abertas.rows[0]?.total || 0);
 
       return res.json({
         total: totalNum,
         aprovadas: aprovadasNum,
         reprovadas: reprovadasNum,
+        reprovadas_abertas: abertasNum,
         taxa_aprovacao: totalNum > 0 ? parseFloat(((aprovadasNum / totalNum) * 100).toFixed(1)) : 0,
       });
     } catch (_) {
-      return res.json({ total: 0, aprovadas: 0, reprovadas: 0, taxa_aprovacao: 0 });
+      return res.json({ total: 0, aprovadas: 0, reprovadas: 0, reprovadas_abertas: 0, taxa_aprovacao: 0 });
     }
   });
 

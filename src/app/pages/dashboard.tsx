@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import {
   TrendingUp,
   Recycle,
@@ -12,6 +13,8 @@ import {
   XCircle,
   TrendingDown,
   Wallet,
+  ShieldCheck,
+  AlertTriangle,
 } from "lucide-react";
 import {
   PieChart,
@@ -48,7 +51,14 @@ interface ValidacaoStats {
   total: number;
   aprovadas: number;
   reprovadas: number;
+  reprovadas_abertas: number;
   taxa_aprovacao: number;
+}
+
+interface ProcessoStats {
+  taxa_desperdicio_real: number;
+  taxa_prejuizo_evitado: number;
+  taxa_perda_simulada_sem_processo: number;
 }
 
 const COLORS = ["#2E7D32", "#66BB6A", "#81C784", "#A5D6A7", "#C8E6C9", "#F9A825", "#0288D1", "#7B1FA2"];
@@ -63,6 +73,7 @@ export function Dashboard() {
   const [stats, setStats] = useState<DashStats | null>(null);
   const [iaStats, setIaStats] = useState<IaStats | null>(null);
   const [validacaoStats, setValidacaoStats] = useState<ValidacaoStats | null>(null);
+  const [processoStats, setProcessoStats] = useState<ProcessoStats | null>(null);
 
   useEffect(() => {
     api.get<DashStats>("/api/dashboard/stats")
@@ -73,6 +84,9 @@ export function Dashboard() {
       .catch(() => {});
     api.get<ValidacaoStats>("/api/validacoes/stats")
       .then((r) => setValidacaoStats(r.data))
+      .catch(() => {});
+    api.get<ProcessoStats>("/api/analise/processo")
+      .then((r) => setProcessoStats(r.data))
       .catch(() => {});
   }, []);
 
@@ -113,7 +127,7 @@ export function Dashboard() {
           <ScanLine className="w-6 h-6 text-[#2E7D32]" />
           <h2 className="text-xl font-bold text-[#424242]">Posto de Validação</h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
           <StatCard
             title="Itens Validados"
             value={String(validacaoStats?.total ?? 0)}
@@ -138,6 +152,16 @@ export function Dashboard() {
             trendUp={false}
             iconColor="bg-red-100 text-red-700"
           />
+          <Link to="/tracking" className="block">
+            <StatCard
+              title="Problemas em Aberto"
+              value={String(validacaoStats?.reprovadas_abertas ?? 0)}
+              icon={AlertTriangle}
+              trend={(validacaoStats?.reprovadas_abertas ?? 0) > 0 ? "Corrija antes de expedir →" : "Nenhum pendente"}
+              trendUp={(validacaoStats?.reprovadas_abertas ?? 0) === 0}
+              iconColor="bg-amber-100 text-amber-700"
+            />
+          </Link>
         </div>
       </div>
 
@@ -209,6 +233,43 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* Análise do Processo */}
+      <div className="mb-6 lg:mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-6 h-6 text-[#2E7D32]" />
+            <h2 className="text-xl font-bold text-[#424242]">Análise do Processo</h2>
+          </div>
+          <Link to="/materials" className="text-sm text-[#2E7D32] hover:underline">Ver detalhes e projeções →</Link>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
+          <StatCard
+            title="Taxa de Desperdício Real"
+            value={`${processoStats?.taxa_desperdicio_real ?? 0}%`}
+            icon={TrendingDown}
+            trend="Do valor total em risco"
+            trendUp={false}
+            iconColor="bg-red-100 text-red-700"
+          />
+          <StatCard
+            title="Taxa de Prejuízo Evitado"
+            value={`${processoStats?.taxa_prejuizo_evitado ?? 0}%`}
+            icon={ShieldCheck}
+            trend="Graças ao reaproveitamento"
+            trendUp={true}
+            iconColor="bg-[#66BB6A]/10 text-[#66BB6A]"
+          />
+          <StatCard
+            title="Desperdício Simulado sem o Processo"
+            value={`${processoStats?.taxa_perda_simulada_sem_processo ?? 0}%`}
+            icon={TrendingDown}
+            trend="Cenário sem reaproveitamento"
+            trendUp={false}
+            iconColor="bg-orange-100 text-orange-700"
+          />
+        </div>
+      </div>
+
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Pie Chart - Tipos de Materiais */}
@@ -261,10 +322,14 @@ export function Dashboard() {
 
       {/* IA Section */}
       <div className="mt-8">
-        <div className="flex items-center gap-2 mb-6">
+        <div className="flex items-center gap-2 mb-2">
           <Brain className="w-6 h-6 text-[#2E7D32]" />
-          <h2 className="text-xl font-bold text-[#424242]">Inteligência Artificial</h2>
+          <h2 className="text-xl font-bold text-[#424242]">IA de Referência (Validação de Expedição)</h2>
         </div>
+        <p className="text-xs text-[#717182] mb-6 max-w-2xl">
+          Leitura não-vinculante capturada durante a validação de expedição — não classifica material no
+          registro de resíduos, que é feito manualmente pela equipe.
+        </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-6">
           <StatCard
@@ -276,10 +341,10 @@ export function Dashboard() {
             iconColor="bg-purple-100 text-purple-700"
           />
           <StatCard
-            title="Peso Automático Total"
+            title="Peso Total Registrado"
             value={`${fmt(totalKg)} kg`}
             icon={Activity}
-            trend="Via câmera + ESP32"
+            trend="Via sensor HX711 (ESP32)"
             trendUp={true}
             iconColor="bg-blue-100 text-blue-700"
           />

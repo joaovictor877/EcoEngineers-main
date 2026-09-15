@@ -6,7 +6,7 @@ import { RegisterWaste } from "./pages/register-waste";
 import { TrackingMaterial } from "./pages/tracking-material";
 import { ProductManagement } from "./pages/product-management";
 import { CameraManagement } from "./pages/camera-management";
-import { MaterialManagement } from "./pages/material-management";
+import { ProcessAnalysis } from "./pages/process-analysis";
 import { Reports } from "./pages/reports";
 import { Settings } from "./pages/settings";
 import { Layout } from "./components/layout";
@@ -68,7 +68,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "materials",
-        Component: () => <RequireRole path="/materials"><MaterialManagement /></RequireRole>,
+        Component: () => <RequireRole path="/materials"><ProcessAnalysis /></RequireRole>,
       },
       {
         path: "reports",

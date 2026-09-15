@@ -77,7 +77,8 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
   router.get('/etiquetas', authMiddleware, async (req, res) => {
     try {
       const r = await dbQuery(
-        `SELECT e.*, p.nome AS produto_nome, p.sku AS produto_sku
+        `SELECT e.*, p.nome AS produto_nome, p.sku AS produto_sku,
+                p.peso_esperado_kg AS produto_peso_esperado_kg, p.tolerancia_kg AS produto_tolerancia_kg
          FROM etiquetas e LEFT JOIN produtos p ON e.produto_id = p.id
          ORDER BY e.criado_em DESC`
       );

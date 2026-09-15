@@ -6,6 +6,7 @@ const fs      = require('fs');
 const path    = require('path');
 const multer  = require('multer');
 const { spawnMjpegBridge } = require('../services/ffmpegService');
+const { capturarFrameCamera } = require('../services/aiService');
 const { getUploadsDir } = require('../services/uploadDir');
 
 const uploadsDir = getUploadsDir();
@@ -131,6 +132,29 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
       return res.json({ ok: true });
     } catch (err) {
       return res.status(500).json({ error: 'Falha ao remover câmera' });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // POST /api/cameras/snapshot — captura só a foto (sem IA), usado pelo
+  // Registro de Resíduos como evidência fotográfica manual.
+  // Body: { camera_url }
+  // ─────────────────────────────────────────────────────────
+  router.post('/snapshot', authMiddleware, async (req, res) => {
+    const { camera_url } = req.body;
+    if (!camera_url) return res.status(400).json({ error: 'camera_url é obrigatória' });
+    try {
+      const file = await capturarFrameCamera(camera_url);
+      return res.json({ imagem_url: `/uploads/${file.filename}` });
+    } catch (err) {
+      console.error('[Cameras] Erro em /snapshot:', err.message);
+      const unreachable = ['fetch failed', 'ECONNREFUSED', 'ETIMEDOUT', 'timeout', 'ENETUNREACH', 'HTTP 530', 'Camera inacessivel'].some((k) =>
+        (err.message || '').toLowerCase().includes(k.toLowerCase())
+      );
+      if (unreachable) {
+        return res.status(502).json({ error: 'Câmera inacessível a partir do servidor. A câmera deve estar na mesma rede que o backend (não funciona para câmeras locais quando o backend está no Azure).' });
+      }
+      return res.status(500).json({ error: err.message });
     }
   });
 

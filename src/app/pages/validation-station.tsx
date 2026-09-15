@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Camera, Wifi, Activity, QrCode, ScanLine, RefreshCw,
-  CheckCircle2, XCircle, PackageSearch,
+  CheckCircle2, XCircle, PackageSearch, Cpu, Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import api, { API_URL } from "../lib/api";
@@ -33,11 +33,22 @@ interface Validacao {
 const formatWeightKg = (peso: number) =>
   peso.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
+interface HWStatus {
+  esp32: DevStatus;
+  arduino: DevStatus;
+  sensor: DevStatus;
+  camera: DevStatus;
+}
+
 export function ValidationStation() {
-  const [hwStatus, setHwStatus] = useState<{ camera: DevStatus; sensor: DevStatus }>({
-    camera: "inativa",
+  const [hwStatus, setHwStatus] = useState<HWStatus>({
+    esp32: "desconectado",
+    arduino: "desconectado",
     sensor: "inativo",
+    camera: "inativa",
   });
+
+  const [focusedPanel, setFocusedPanel] = useState<"camera" | "balanca">("camera");
 
   const [cameraUrl, setCameraUrl] = useState(
     import.meta.env.VITE_CAMERA_URL || "https://camera.joaovictor.app.br"
@@ -62,7 +73,7 @@ export function ValidationStation() {
       const p = Number(data.peso);
       if (!Number.isFinite(p)) return;
       setPeso(formatWeightKg(p));
-      setHwStatus((prev) => ({ ...prev, sensor: "ativo" }));
+      setHwStatus((prev) => ({ ...prev, arduino: "conectado", sensor: "ativo" }));
       if (!weightNotifiedRef.current) {
         toast.success(`Balança ativa — peso inicial: ${formatWeightKg(p)} kg`);
         weightNotifiedRef.current = true;
@@ -73,12 +84,19 @@ export function ValidationStation() {
       setHistorico((prev) => [data, ...prev].slice(0, 20));
     };
 
+    const onDispositivo = (dev: { tipo: string; status: DevStatus }) => {
+      if (dev.tipo === "esp32") setHwStatus((p) => ({ ...p, esp32: dev.status }));
+      else if (dev.tipo === "arduino_uno") setHwStatus((p) => ({ ...p, arduino: dev.status }));
+    };
+
     socket.on("peso_atualizado", onPeso);
     socket.on("validacao_concluida", onValidacao);
+    socket.on("dispositivo_atualizado", onDispositivo);
 
     return () => {
       socket.off("peso_atualizado", onPeso);
       socket.off("validacao_concluida", onValidacao);
+      socket.off("dispositivo_atualizado", onDispositivo);
       socket.disconnect();
     };
   }, []);
@@ -104,6 +122,11 @@ export function ValidationStation() {
     setCameraSession((s) => s + 1);
     setHwStatus((p) => ({ ...p, camera: "ativa" }));
     toast.success("📷 Câmera conectada!");
+  };
+
+  const conectarHardware = () => {
+    setHwStatus((p) => ({ ...p, esp32: "conectado", arduino: "conectado", sensor: "ativo" }));
+    toast.success("✅ Hardware ESP32 + Arduino conectados!");
   };
 
   const getApiErrorMessage = (error: any, fallback: string) =>
@@ -133,6 +156,13 @@ export function ValidationStation() {
     }
   };
 
+  const hwItems: { label: string; icon: React.ElementType; key: keyof HWStatus }[] = [
+    { label: "ESP32",   icon: Cpu,      key: "esp32"   },
+    { label: "Arduino", icon: Zap,      key: "arduino" },
+    { label: "Balança", icon: Activity, key: "sensor"  },
+    { label: "Câmera",  icon: Camera,   key: "camera"  },
+  ];
+
   return (
     <div className="p-4 lg:p-8">
       <div className="mb-6">
@@ -140,80 +170,130 @@ export function ValidationStation() {
         <p className="text-[#717182]">Câmera + balança + QR Code — confronto antes da expedição</p>
       </div>
 
-      {/* Hardware status */}
-      <div className="grid grid-cols-2 gap-3 mb-6 max-w-md">
-        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${statusColor(hwStatus.camera)}`}>
-          <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusDot(hwStatus.camera)}`} />
-          <Camera className="w-4 h-4 flex-shrink-0 opacity-70" />
-          <div>
-            <div className="text-xs font-semibold">Câmera</div>
-            <div className="text-xs capitalize opacity-80">{hwStatus.camera}</div>
+      {/* Hardware status — sempre visível, independente do painel em foco */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {hwItems.map(({ label, icon: Icon, key }) => (
+          <div key={key} className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${statusColor(hwStatus[key])}`}>
+            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusDot(hwStatus[key])}`} />
+            <Icon className="w-4 h-4 flex-shrink-0 opacity-70" />
+            <div>
+              <div className="text-xs font-semibold">{label}</div>
+              <div className="text-xs capitalize opacity-80">{hwStatus[key]}</div>
+            </div>
           </div>
-        </div>
-        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${statusColor(hwStatus.sensor)}`}>
-          <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusDot(hwStatus.sensor)}`} />
-          <Activity className="w-4 h-4 flex-shrink-0 opacity-70" />
-          <div>
-            <div className="text-xs font-semibold">Balança</div>
-            <div className="text-xs capitalize opacity-80">{hwStatus.sensor}</div>
-          </div>
-        </div>
+        ))}
       </div>
+      <button onClick={conectarHardware} className="mb-6 bg-[#66BB6A] hover:bg-[#4CAF50] text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+        <Wifi className="w-4 h-4" /> Conectar ESP32 + Arduino
+      </button>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* LEFT: camera + controls */}
+        {/* LEFT: camera + balança, alternando com um clique */}
         <div className="space-y-4">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-              <h3 className="font-semibold text-[#424242] flex items-center gap-2 text-sm">
-                <Camera className="w-4 h-4 text-[#2E7D32]" /> Câmera do Posto
-              </h3>
-              {hwStatus.camera === "ativa" && (
-                <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> AO VIVO
-                </span>
-              )}
-            </div>
-            <div className="aspect-video bg-gray-900 flex items-center justify-center overflow-hidden">
-              {cameraActive ? (
-                <CameraPreview
-                  key={`${cameraUrl}-${cameraSession}`}
-                  cameraUrl={cameraUrl}
-                  onStatusChange={(status) => setHwStatus((p) => (p.camera === status ? p : { ...p, camera: status }))}
-                />
-              ) : (
-                <div className="text-center text-gray-500 p-6">
-                  <Camera className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">Câmera desconectada</p>
-                </div>
-              )}
-            </div>
-            <div className="p-4 space-y-2">
-              <input
-                type="text"
-                value={cameraUrl}
-                onChange={(e) => setCameraUrl(e.target.value)}
-                placeholder="https://camera.joaovictor.app.br"
-                className="w-full text-sm px-3 py-2 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none transition-all"
-              />
-              <button onClick={conectarCamera} className="w-full bg-[#2E7D32] hover:bg-[#1B5E20] text-white py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1">
-                <Wifi className="w-3.5 h-3.5" /> Conectar Câmera
-              </button>
-            </div>
+          {/* Troca fluida entre os dois painéis */}
+          <div className="flex gap-2 bg-white rounded-xl border border-gray-100 p-1.5">
+            <button
+              onClick={() => setFocusedPanel("camera")}
+              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+                focusedPanel === "camera" ? "bg-[#2E7D32] text-white" : "text-[#717182] hover:bg-gray-50"
+              }`}
+            >
+              <Camera className="w-4 h-4" /> Câmera
+            </button>
+            <button
+              onClick={() => setFocusedPanel("balanca")}
+              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+                focusedPanel === "balanca" ? "bg-[#2E7D32] text-white" : "text-[#717182] hover:bg-gray-50"
+              }`}
+            >
+              <Activity className="w-4 h-4" /> Balança
+            </button>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
-            <h3 className="font-semibold text-[#424242] flex items-center gap-2 text-sm">
-              <Activity className="w-4 h-4 text-[#2E7D32]" /> Peso Medido (kg)
-              {hwStatus.sensor === "ativo" && <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-normal">Auto</span>}
-            </h3>
-            <input
-              type="text" inputMode="decimal" value={peso}
-              onChange={(e) => setPeso(e.target.value.replace(".", ","))}
-              placeholder="0,000"
-              className="w-full px-4 py-3 rounded-lg border border-transparent bg-[#F5F5F5] focus:border-[#2E7D32] focus:outline-none transition-all"
-            />
+          {focusedPanel === "camera" ? (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                <h3 className="font-semibold text-[#424242] flex items-center gap-2 text-sm">
+                  <Camera className="w-4 h-4 text-[#2E7D32]" /> Câmera do Posto
+                </h3>
+                {hwStatus.camera === "ativa" && (
+                  <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> AO VIVO
+                  </span>
+                )}
+              </div>
+              <div className="aspect-video bg-gray-900 flex items-center justify-center overflow-hidden">
+                {cameraActive ? (
+                  <CameraPreview
+                    key={`${cameraUrl}-${cameraSession}`}
+                    cameraUrl={cameraUrl}
+                    onStatusChange={(status) => setHwStatus((p) => (p.camera === status ? p : { ...p, camera: status }))}
+                  />
+                ) : (
+                  <div className="text-center text-gray-500 p-6">
+                    <Camera className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">Câmera desconectada</p>
+                  </div>
+                )}
+              </div>
+              <div className="p-4 space-y-2">
+                <input
+                  type="text"
+                  value={cameraUrl}
+                  onChange={(e) => setCameraUrl(e.target.value)}
+                  placeholder="https://camera.joaovictor.app.br"
+                  className="w-full text-sm px-3 py-2 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none transition-all"
+                />
+                <button onClick={conectarCamera} className="w-full bg-[#2E7D32] hover:bg-[#1B5E20] text-white py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1">
+                  <Wifi className="w-3.5 h-3.5" /> Conectar Câmera
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setFocusedPanel("camera")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-colors ${statusColor(hwStatus.camera)} hover:opacity-80`}
+            >
+              <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusDot(hwStatus.camera)}`} />
+              <Camera className="w-4 h-4 flex-shrink-0 opacity-70" />
+              <div className="flex-1">
+                <div className="text-xs font-semibold">Câmera do Posto</div>
+                <div className="text-xs capitalize opacity-80">{hwStatus.camera}</div>
+              </div>
+              <span className="text-xs opacity-60">ver →</span>
+            </button>
+          )}
 
+          {focusedPanel === "balanca" ? (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
+              <h3 className="font-semibold text-[#424242] flex items-center gap-2 text-sm">
+                <Activity className="w-4 h-4 text-[#2E7D32]" /> Peso Medido (kg)
+                {hwStatus.sensor === "ativo" && <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-normal">Auto</span>}
+              </h3>
+              <input
+                type="text" inputMode="decimal" value={peso}
+                onChange={(e) => setPeso(e.target.value.replace(".", ","))}
+                placeholder="0,000"
+                className="w-full px-4 py-3 rounded-lg border border-transparent bg-[#F5F5F5] focus:border-[#2E7D32] focus:outline-none transition-all"
+              />
+            </div>
+          ) : (
+            <button
+              onClick={() => setFocusedPanel("balanca")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-colors ${statusColor(hwStatus.sensor)} hover:opacity-80`}
+            >
+              <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusDot(hwStatus.sensor)}`} />
+              <Activity className="w-4 h-4 flex-shrink-0 opacity-70" />
+              <div className="flex-1">
+                <div className="text-xs font-semibold">Peso Medido</div>
+                <div className="text-xs opacity-80">{peso ? `${peso} kg` : hwStatus.sensor}</div>
+              </div>
+              <span className="text-xs opacity-60">ver →</span>
+            </button>
+          )}
+
+          {/* Ação principal — sempre visível, não depende do painel em foco */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
             {postos.length > 0 && (
               <div>
                 <label className="block text-xs font-medium text-[#717182] mb-1">Posto</label>

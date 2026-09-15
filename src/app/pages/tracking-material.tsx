@@ -1,7 +1,11 @@
 ﻿import { useState, useEffect } from "react";
-import { Factory, Package, Warehouse, Recycle, Trash2, ArrowRight, Brain, RefreshCw, ScanLine, CheckCircle2, XCircle } from "lucide-react";
+import {
+  Factory, Package, Warehouse, Recycle, Trash2, ArrowRight, Brain, RefreshCw,
+  ScanLine, CheckCircle2, XCircle, AlertTriangle, Truck, CheckCheck,
+} from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
+import { socket } from "../lib/socket";
 
 interface Validacao {
   id: number;
@@ -12,6 +16,10 @@ interface Validacao {
   produto_nome: string | null;
   produto_sku: string | null;
   criado_em: string;
+  resolvido: number | boolean;
+  resolvido_em: string | null;
+  status_entrega: "expedido" | "entregue";
+  entregue_em: string | null;
 }
 
 interface Residuo {
@@ -61,8 +69,44 @@ export function TrackingMaterial() {
   const [residuos, setResiduos] = useState<Residuo[]>([]);
   const [validacoes, setValidacoes] = useState<Validacao[]>([]);
   const [loading, setLoading] = useState(true);
+  const [resolvendoId, setResolvendoId] = useState<number | null>(null);
+  const [entregandoId, setEntregandoId] = useState<number | null>(null);
 
   useEffect(() => { loadData(); }, []);
+
+  // Alertas em tempo real: uma reprovação nova avisa quem estiver com a
+  // página de Rastreamento aberta, sem precisar atualizar manualmente.
+  useEffect(() => {
+    socket.connect();
+
+    const upsert = (v: Validacao) => {
+      setValidacoes((prev) => {
+        const idx = prev.findIndex((p) => p.id === v.id);
+        if (idx === -1) return [v, ...prev];
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...v };
+        return next;
+      });
+    };
+
+    const onValidacao = (data: Validacao) => {
+      upsert(data);
+      if (data.resultado === "reprovado") {
+        toast.error(`❌ Problema detectado na expedição — ${data.produto_nome || "item"}: ${data.motivo_divergencia || "verifique"}`);
+      }
+    };
+
+    socket.on("validacao_concluida", onValidacao);
+    socket.on("validacao_resolvida", upsert);
+    socket.on("validacao_entregue", upsert);
+
+    return () => {
+      socket.off("validacao_concluida", onValidacao);
+      socket.off("validacao_resolvida", upsert);
+      socket.off("validacao_entregue", upsert);
+      socket.disconnect();
+    };
+  }, []);
 
   async function loadData() {
     setLoading(true);
@@ -80,6 +124,34 @@ export function TrackingMaterial() {
     }
   }
 
+  async function resolverValidacao(id: number) {
+    setResolvendoId(id);
+    try {
+      const { data } = await api.put<Validacao>(`/api/validacoes/${id}/resolver`);
+      setValidacoes((prev) => prev.map((v) => (v.id === id ? { ...v, ...data } : v)));
+      toast.success("Problema marcado como resolvido.");
+    } catch {
+      toast.error("Falha ao marcar como resolvido");
+    } finally {
+      setResolvendoId(null);
+    }
+  }
+
+  async function marcarEntregue(id: number) {
+    setEntregandoId(id);
+    try {
+      const { data } = await api.put<Validacao>(`/api/validacoes/${id}/entregar`);
+      setValidacoes((prev) => prev.map((v) => (v.id === id ? { ...v, ...data } : v)));
+      toast.success("Item marcado como entregue.");
+    } catch {
+      toast.error("Falha ao marcar como entregue");
+    } finally {
+      setEntregandoId(null);
+    }
+  }
+
+  const problemasAbertos = validacoes.filter((v) => v.resultado === "reprovado" && !v.resolvido);
+
   const totalPeso = residuos.reduce((s, r) => s + Number(r.peso || 0), 0);
   const reaproveitados = residuos.filter((r) => r.status === "reaproveitamento").length;
   const iaDetectados   = residuos.filter((r) => r.analise_ia_id).length;
@@ -92,8 +164,8 @@ export function TrackingMaterial() {
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-[#424242] mb-1">Rastreamento</h1>
-          <p className="text-[#717182]">Visualize o fluxo da logística reversa</p>
+          <h1 className="text-3xl font-bold text-[#424242] mb-1">Validação de Expedição</h1>
+          <p className="text-[#717182]">Empacotamento → validação → envio — acompanhe e corrija antes de expedir</p>
         </div>
         <button
           onClick={loadData}
@@ -103,6 +175,40 @@ export function TrackingMaterial() {
           <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
+
+      {/* Alerta de problemas em aberto — sempre visível, mesmo fora da aba de validações */}
+      {problemasAbertos.length > 0 && (
+        <div className="mb-8 bg-red-50 border border-red-300 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3 bg-red-100/70 border-b border-red-200">
+            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <h3 className="font-semibold text-red-800">
+              {problemasAbertos.length} {problemasAbertos.length === 1 ? "problema detectado" : "problemas detectados"} — corrija antes de enviar
+            </h3>
+          </div>
+          <ul className="divide-y divide-red-100">
+            {problemasAbertos.map((v) => (
+              <li key={v.id} className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-red-800">
+                    {v.produto_nome || "Item não identificado"}
+                    {v.produto_sku && <span className="font-normal text-red-700/80"> · {v.produto_sku}</span>}
+                  </p>
+                  <p className="text-xs text-red-700 mt-0.5">{v.motivo_divergencia || "Verifique este item."}</p>
+                  <p className="text-xs text-red-600/70 mt-0.5">{new Date(v.criado_em).toLocaleString("pt-BR")}</p>
+                </div>
+                <button
+                  onClick={() => resolverValidacao(v.id)}
+                  disabled={resolvendoId === v.id}
+                  className="self-start md:self-center bg-white hover:bg-red-50 border border-red-300 text-red-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-60 flex-shrink-0"
+                >
+                  {resolvendoId === v.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCheck className="w-4 h-4" />}
+                  Marcar como resolvido
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-2 mb-8 bg-white rounded-xl border border-gray-100 p-1.5 w-fit">
@@ -174,6 +280,7 @@ export function TrackingMaterial() {
                     <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Peso (kg)</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Resultado</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Motivo</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Envio</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-[#424242]">Data</th>
                   </tr>
                 </thead>
@@ -181,20 +288,22 @@ export function TrackingMaterial() {
                   {loading ? (
                     Array.from({ length: 5 }).map((_, i) => (
                       <tr key={i}>
-                        {Array.from({ length: 7 }).map((__, j) => (
+                        {Array.from({ length: 8 }).map((__, j) => (
                           <td key={j} className="px-6 py-4"><div className="h-4 bg-gray-100 rounded animate-pulse" /></td>
                         ))}
                       </tr>
                     ))
                   ) : validacoes.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-12 text-[#717182]">
+                      <td colSpan={8} className="text-center py-12 text-[#717182]">
                         Nenhuma validação registrada ainda. Use a página "Posto de Validação" para começar.
                       </td>
                     </tr>
                   ) : (
-                    validacoes.map((v) => (
-                      <tr key={v.id} className="hover:bg-[#F5F5F5]/50 transition-colors">
+                    validacoes.map((v) => {
+                      const problemaAberto = v.resultado === "reprovado" && !v.resolvido;
+                      return (
+                      <tr key={v.id} className={`transition-colors ${problemaAberto ? "bg-red-50 hover:bg-red-100/70" : "hover:bg-[#F5F5F5]/50"}`}>
                         <td className="px-6 py-4"><span className="font-mono text-sm text-[#717182]">#{String(v.id).padStart(4, "0")}</span></td>
                         <td className="px-6 py-4">
                           <p className="text-sm font-semibold text-[#424242]">{v.produto_nome || "—"}</p>
@@ -206,11 +315,44 @@ export function TrackingMaterial() {
                           <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${v.resultado === "aprovado" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
                             {v.resultado === "aprovado" ? "Aprovado" : "Reprovado"}
                           </span>
+                          {v.resultado === "reprovado" && (
+                            v.resolvido ? (
+                              <span className="block mt-1 text-xs text-green-600">✓ resolvido</span>
+                            ) : (
+                              <button
+                                onClick={() => resolverValidacao(v.id)}
+                                disabled={resolvendoId === v.id}
+                                className="block mt-1 text-xs text-red-700 underline hover:text-red-800 disabled:opacity-60"
+                              >
+                                marcar resolvido
+                              </button>
+                            )
+                          )}
                         </td>
                         <td className="px-6 py-4"><span className="text-xs text-[#717182]">{v.motivo_divergencia || "—"}</span></td>
+                        <td className="px-6 py-4">
+                          {v.resultado === "aprovado" ? (
+                            v.status_entrega === "entregue" ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                <CheckCheck className="w-3 h-3" /> Entregue
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => marcarEntregue(v.id)}
+                                disabled={entregandoId === v.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-700 transition-colors disabled:opacity-60"
+                              >
+                                <Truck className="w-3 h-3" /> {entregandoId === v.id ? "..." : "Marcar entregue"}
+                              </button>
+                            )
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </td>
                         <td className="px-6 py-4"><span className="text-sm text-[#717182]">{v.criado_em ? new Date(v.criado_em).toLocaleString("pt-BR") : "—"}</span></td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>

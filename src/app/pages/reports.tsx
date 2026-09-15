@@ -22,6 +22,18 @@ interface DashboardStats {
   total_kg: number;
   reused_kg: number;
   by_material: { name: string; total: number }[];
+  prejuizo_descarte_total?: number;
+  economia_reaproveitamento_total?: number;
+}
+
+interface ProcessoStats {
+  taxa_desperdicio_real: number;
+  taxa_economia_gerada: number;
+  taxa_prejuizo_evitado: number;
+  taxa_perda_simulada_sem_processo: number;
+  economia_gerada: number;
+  prejuizo_real: number;
+  precisao_sistema: { taxa_aprovacao_expedicao: number; total_validacoes: number };
 }
 
 const MONTHS_PT = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -30,6 +42,7 @@ const COLORS = ["#2E7D32", "#66BB6A", "#F9A825", "#0288D1", "#7B1FA2", "#D32F2F"
 export function Reports() {
   const [wastes, setWastes] = useState<Waste[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [processoStats, setProcessoStats] = useState<ProcessoStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
     startDate: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
@@ -42,12 +55,14 @@ export function Reports() {
   async function loadData() {
     setLoading(true);
     try {
-      const [wastesRes, statsRes] = await Promise.all([
+      const [wastesRes, statsRes, processoRes] = await Promise.all([
         api.get<Waste[]>("/api/wastes"),
         api.get<DashboardStats>("/api/dashboard/stats"),
+        api.get<ProcessoStats>("/api/analise/processo"),
       ]);
       setWastes(wastesRes.data);
       setStats(statsRes.data);
+      setProcessoStats(processoRes.data);
     } catch {
       toast.error("Falha ao carregar relatórios");
     } finally {
@@ -171,6 +186,26 @@ export function Reports() {
       </tr>`).join("");
     const matRows = byMaterial.map((m) =>
       `<tr><td>${m.name}</td><td style="text-align:right">${m.total.toLocaleString("pt-BR")} kg</td></tr>`).join("");
+
+    const impactos: string[] = [];
+    if (processoStats) {
+      if (processoStats.economia_gerada > 0) {
+        impactos.push(`R$ ${processoStats.economia_gerada.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} economizados via reaproveitamento de material.`);
+      }
+      if (processoStats.taxa_prejuizo_evitado > 0) {
+        impactos.push(`${processoStats.taxa_prejuizo_evitado}% do prejuízo potencial foi evitado graças ao processo.`);
+      }
+      if (processoStats.precisao_sistema.total_validacoes > 0) {
+        impactos.push(`${processoStats.precisao_sistema.taxa_aprovacao_expedicao}% dos itens aprovados de primeira na validação de expedição (${processoStats.precisao_sistema.total_validacoes} validações).`);
+      }
+      if (reusedKg > 0) {
+        impactos.push(`${reusedKg.toLocaleString("pt-BR")} kg de material reaproveitado no período.`);
+      }
+    }
+    const impactosHtml = impactos.length
+      ? `<ul class="impactos">${impactos.map((i) => `<li>${i}</li>`).join("")}</ul>`
+      : `<p class="subtitle">Sem dados suficientes ainda para destacar impactos.</p>`;
+
     const win = window.open("", "_blank");
     if (!win) { toast.error("Popup bloqueado. Permita popups e tente novamente."); return; }
     win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
@@ -187,6 +222,8 @@ export function Reports() {
   th { background: #f5f5f5; padding: 8px; text-align: left; font-size: 11px; }
   td { padding: 7px 8px; border-bottom: 1px solid #f0f0f0; font-size: 11px; }
   .section-title { font-size: 14px; font-weight: bold; color: #424242; margin: 16px 0 8px; }
+  .impactos { margin: 0 0 24px; padding-left: 18px; }
+  .impactos li { font-size: 12px; color: #424242; margin-bottom: 5px; }
   .footer { margin-top: 32px; font-size: 10px; color: #999; text-align: center; }
   @media print { body { margin: 0; } }
 </style></head><body>
@@ -198,6 +235,15 @@ export function Reports() {
   <div class="kpi"><div class="kpi-label">Descartado</div><div class="kpi-value" style="color:#D32F2F">${discarded.toLocaleString("pt-BR")} kg</div></div>
   <div class="kpi"><div class="kpi-label">Taxa de Reaproveitamento</div><div class="kpi-value" style="color:#2E7D32">${reusedRate}%</div></div>
 </div>
+${processoStats ? `
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Taxa de Desperdício Real</div><div class="kpi-value" style="color:#D32F2F">${processoStats.taxa_desperdicio_real}%</div></div>
+  <div class="kpi"><div class="kpi-label">Taxa de Economia Gerada</div><div class="kpi-value" style="color:#2E7D32">${processoStats.taxa_economia_gerada}%</div></div>
+  <div class="kpi"><div class="kpi-label">Taxa de Prejuízo Evitado</div><div class="kpi-value" style="color:#2E7D32">${processoStats.taxa_prejuizo_evitado}%</div></div>
+  <div class="kpi"><div class="kpi-label">Desperdício Simulado sem Processo</div><div class="kpi-value" style="color:#EF6C00">${processoStats.taxa_perda_simulada_sem_processo}%</div></div>
+</div>` : ""}
+<div class="section-title">Principais Impactos e Benefícios</div>
+${impactosHtml}
 <div class="section-title">Resumo por Material</div>
 <table><thead><tr><th>Material</th><th>Total (kg)</th></tr></thead><tbody>${matRows}</tbody></table>
 <div class="section-title">Registros de Resíduos (últimos ${Math.min(filtered.length, 50)})</div>

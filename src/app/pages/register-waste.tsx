@@ -1,39 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  Camera, Save, Wifi, Cpu, Activity, Brain,
-  RefreshCw, CheckCircle, Zap, AlertCircle, DollarSign, TrendingDown,
+  Camera, Save, Wifi, RefreshCw, CheckCircle, DollarSign, TrendingDown, X, Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import api, { API_URL } from "../lib/api";
 import { socket } from "../lib/socket";
-import {
-  CameraPreview, FastCameraPreview, statusColor, statusDot, normalizeCameraBase,
-} from "../components/camera-preview";
-import type { DevStatus } from "../components/camera-preview";
-
-interface HWStatus {
-  esp32: DevStatus;
-  arduino: DevStatus;
-  sensor: DevStatus;
-  camera: DevStatus;
-}
-
-interface AIResult {
-  material_detectado: string;
-  categoria_detectada: string;
-  confianca: number;
-  observacao: string;
-  sugestao_destino: string;
-  analise_id?: number;
-  imagem_url?: string;
-}
-
-const DESTINO_LABEL: Record<string, string> = {
-  reaproveitamento: "Reaproveitamento Interno",
-  reciclagem: "Reciclagem Externa",
-  descarte: "Descarte Controlado",
-  venda: "Venda para Terceiros",
-};
+import { FastCameraPreview, normalizeCameraBase } from "../components/camera-preview";
 
 interface Material {
   id: number;
@@ -58,23 +30,21 @@ export function RegisterWaste() {
 
   const [materialsList, setMaterialsList] = useState<Material[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const [hwStatus, setHwStatus] = useState<HWStatus>({
-    esp32: "desconectado",
-    arduino: "desconectado",
-    sensor: "inativo",
-    camera: "inativa",
-  });
+  const [pesoLive, setPesoLive] = useState(false);
 
   const [cameraUrl, setCameraUrl] = useState(
     import.meta.env.VITE_CAMERA_URL || "https://camera.joaovictor.app.br"
   );
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraSession, setCameraSession] = useState(0);
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [aiResult, setAiResult] = useState<AIResult | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isDetectedByAI, setIsDetectedByAI] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+
+  // Foto de evidência: ou um arquivo escolhido manualmente (fotoFile), ou o
+  // caminho já salvo no servidor por uma captura de câmera (fotoServerUrl) —
+  // nunca os dois ao mesmo tempo. Serve só de registro, não classifica nada.
+  const [fotoFile, setFotoFile] = useState<File | null>(null);
+  const [fotoServerUrl, setFotoServerUrl] = useState<string | null>(null);
+  const [fotoPreview, setFotoPreview] = useState<string | null>(null);
 
   const weightConnectionNotifiedRef = useRef(false);
 
@@ -89,7 +59,8 @@ export function RegisterWaste() {
 
   const parseWeightKg = (peso: string) => Number(peso.replace(",", "."));
 
-  // ── Socket.IO ──────────────────────────────────────────────
+  // ── Socket.IO — só preenche o peso automaticamente. A conectividade do
+  // ESP32/Arduino é gerenciada e exibida no Posto de Validação.
   useEffect(() => {
     socket.connect();
 
@@ -101,29 +72,18 @@ export function RegisterWaste() {
       setFormData((prev) => (
         prev.weight === formattedWeight ? prev : { ...prev, weight: formattedWeight }
       ));
-      setHwStatus((prev) => ({ ...prev, arduino: "conectado", sensor: "ativo" }));
+      setPesoLive(true);
 
       if (!weightConnectionNotifiedRef.current) {
-        toast.success(`Arduino e HX711 ativos — peso inicial: ${formattedWeight} kg`);
+        toast.success(`Balança ativa — peso inicial: ${formattedWeight} kg`);
         weightConnectionNotifiedRef.current = true;
       }
     };
 
-    const onAnalise = (data: AIResult) => applyAIResult(data);
-
-    const onDispositivo = (dev: { tipo: string; status: DevStatus }) => {
-      if (dev.tipo === "esp32") setHwStatus((p) => ({ ...p, esp32: dev.status }));
-      else if (dev.tipo === "arduino_uno") setHwStatus((p) => ({ ...p, arduino: dev.status }));
-    };
-
     socket.on("peso_atualizado", onPeso);
-    socket.on("analise_ia_concluida", onAnalise);
-    socket.on("dispositivo_atualizado", onDispositivo);
 
     return () => {
       socket.off("peso_atualizado", onPeso);
-      socket.off("analise_ia_concluida", onAnalise);
-      socket.off("dispositivo_atualizado", onDispositivo);
       socket.disconnect();
     };
   }, []);
@@ -135,89 +95,45 @@ export function RegisterWaste() {
       .catch(() => toast.error("Falha ao carregar lista de materiais"));
   }, []);
 
-  function applyAIResult(data: AIResult) {
-    setAiResult(data);
-    setIsAnalyzing(false);
-    setIsDetectedByAI(true);
-    const destLabel = DESTINO_LABEL[data.sugestao_destino] ? data.sugestao_destino : "";
-    // Try to match AI detected material name to one in the list
-    const aiName = (data.material_detectado || "").toLowerCase();
-    const match = materialsList.find(
-      (m) => m.name.toLowerCase() === aiName ||
-             m.name.toLowerCase().includes(aiName) ||
-             aiName.includes(m.name.toLowerCase())
-    );
-    setFormData((prev) => ({
-      ...prev,
-      material_id: match ? String(match.id) : "",
-      materialType: data.material_detectado,
-      category: data.categoria_detectada,
-      destination: destLabel || prev.destination,
-      observation: data.observacao,
-    }));
-    if (data.imagem_url) setCapturedImage(`${API_URL}${data.imagem_url}`);
-    toast.success(`🤖 IA: ${data.material_detectado} — ${data.confianca.toFixed(1)}% confiança`);
-  }
-
-  const conectarHardware = () => {
-    setHwStatus((p) => ({ ...p, esp32: "conectado", arduino: "conectado", sensor: "ativo" }));
-    toast.success("✅ Hardware ESP32 + Arduino conectados!");
-  };
-
   const conectarCamera = () => {
     const normalizedUrl = normalizeCameraBase(cameraUrl);
     if (!normalizedUrl) { toast.error("Informe a URL da câmera"); return; }
     setCameraUrl(normalizedUrl);
     setCameraActive(true);
     setCameraSession((session) => session + 1);
-    setHwStatus((p) => ({ ...p, camera: "ativa" }));
     toast.success("📷 Câmera IP conectada!");
   };
 
-  const capturarEAnalisar = async () => {
+  const limparFoto = () => {
+    setFotoFile(null);
+    setFotoServerUrl(null);
+    setFotoPreview(null);
+  };
+
+  const capturarFoto = async () => {
     if (!cameraUrl.trim()) { toast.error("Configure a URL da câmera primeiro"); return; }
-    setIsAnalyzing(true);
-    toast.info("📸 Capturando frame e analisando...");
+    setIsCapturing(true);
+    toast.info("📸 Capturando foto...");
     try {
-      const { data } = await api.post<AIResult>("/api/ia/capturar-camera", { camera_url: cameraUrl });
-      applyAIResult(data);
+      const { data } = await api.post<{ imagem_url: string }>("/api/cameras/snapshot", { camera_url: cameraUrl });
+      setFotoFile(null);
+      setFotoServerUrl(data.imagem_url);
+      setFotoPreview(`${API_URL}${data.imagem_url}`);
+      toast.success("Foto capturada e anexada como evidência.");
     } catch (error: any) {
-      toast.error(getApiErrorMessage(error, "Falha ao capturar imagem da câmera. Verifique a URL."));
-      setIsAnalyzing(false);
+      toast.error(getApiErrorMessage(error, "Falha ao capturar foto da câmera. Verifique a URL."));
+    } finally {
+      setIsCapturing(false);
     }
   };
 
-  const analisarSemImagem = async () => {
-    setIsAnalyzing(true);
-    toast.info("🔍 Analisando com IA...");
-    try {
-      const formPayload = new FormData();
-      const { data } = await api.post<AIResult>("/api/ia/analisar", formPayload, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      applyAIResult(data);
-    } catch (error: any) {
-      toast.error(getApiErrorMessage(error, "Falha na análise de IA"));
-      setIsAnalyzing(false);
-    }
-  };
-
-  const handleUploadImagem = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadImagem = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setIsAnalyzing(true);
-    toast.info("🖼️ Analisando imagem enviada...");
-    const formPayload = new FormData();
-    formPayload.append("imagem", file);
-    try {
-      const { data } = await api.post<AIResult>("/api/ia/analisar", formPayload, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      applyAIResult(data);
-    } catch (error: any) {
-      toast.error(getApiErrorMessage(error, "Falha na análise"));
-      setIsAnalyzing(false);
-    }
+    setFotoServerUrl(null);
+    setFotoFile(file);
+    setFotoPreview(URL.createObjectURL(file));
+    toast.success("Foto anexada como evidência.");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -229,23 +145,23 @@ export function RegisterWaste() {
     if (!formData.destination) { toast.error("Selecione o destino"); return; }
     setIsSubmitting(true);
     try {
-      await api.post("/api/residuos", {
-        material_id: Number(formData.material_id),
-        peso: pesoKg,
-        setor_origem: formData.department,
-        destino: formData.destination,
-        observacao: formData.observation,
-        analise_ia_id: aiResult?.analise_id || null,
-      });
+      const payload = new FormData();
+      payload.append("material_id", formData.material_id);
+      payload.append("peso", String(pesoKg));
+      payload.append("setor_origem", formData.department);
+      payload.append("destino", formData.destination);
+      payload.append("observacao", formData.observation);
+      if (fotoFile) payload.append("foto", fotoFile);
+      else if (fotoServerUrl) payload.append("foto_url", fotoServerUrl);
+
+      await api.post("/api/residuos", payload, { headers: { "Content-Type": "multipart/form-data" } });
       toast.success("✅ Resíduo registrado com sucesso!");
       setFormData({
         material_id: "", materialType: "", category: "", weight: "",
         department: "", date: new Date().toISOString().split("T")[0],
         destination: "", observation: "",
       });
-      setAiResult(null);
-      setIsDetectedByAI(false);
-      setCapturedImage(null);
+      limparFoto();
     } catch (error: unknown) {
       toast.error(getApiErrorMessage(error, "Falha ao registrar resíduo"));
     } finally {
@@ -272,13 +188,6 @@ export function RegisterWaste() {
         : "bg-[#F5F5F5] border-transparent focus:border-[#2E7D32]"
     }`;
 
-  const hwItems: { label: string; icon: React.ElementType; key: keyof HWStatus }[] = [
-    { label: "ESP32",          icon: Cpu,      key: "esp32"   },
-    { label: "Arduino",        icon: Zap,      key: "arduino" },
-    { label: "Sensor de Peso", icon: Activity, key: "sensor"  },
-    { label: "Câmera IP",      icon: Camera,   key: "camera"  },
-  ];
-
   return (
     <div className="p-4 lg:p-8">
       {/* Header */}
@@ -287,59 +196,48 @@ export function RegisterWaste() {
           Registro de Resíduos
         </h1>
         <p className="text-[#717182]">
-          Identificação automática por IA · ESP32 + Arduino · Câmera IP
+          Classificação manual pela equipe · foto só como evidência
         </p>
       </div>
 
-      {/* Hardware Status Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {hwItems.map(({ label, icon: Icon, key }) => (
-          <div
-            key={key}
-            className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${statusColor(hwStatus[key])}`}
-          >
-            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusDot(hwStatus[key])}`} />
-            <Icon className="w-4 h-4 flex-shrink-0 opacity-70" />
-            <div>
-              <div className="text-xs font-semibold">{label}</div>
-              <div className="text-xs capitalize opacity-80">{hwStatus[key]}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── LEFT: Câmera + IA ── */}
+        {/* ── LEFT: Foto de evidência ── */}
         <div className="space-y-4">
-
-          {/* Camera Feed */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
               <h3 className="font-semibold text-[#424242] flex items-center gap-2 text-sm">
-                <Camera className="w-4 h-4 text-[#2E7D32]" /> Câmera IP
+                <Camera className="w-4 h-4 text-[#2E7D32]" /> Foto do Material
               </h3>
-              {hwStatus.camera === "ativa" && (
+              {cameraActive && (
                 <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
                   <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> AO VIVO
                 </span>
               )}
             </div>
-            <div className="aspect-video bg-gray-900 flex items-center justify-center overflow-hidden">
-              {cameraActive ? (
+            <div className="aspect-video bg-gray-900 flex items-center justify-center overflow-hidden relative">
+              {fotoPreview ? (
+                <>
+                  <img src={fotoPreview} alt="Evidência do material" className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={limparFoto}
+                    className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full text-white"
+                    title="Remover foto"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              ) : cameraActive ? (
                 <FastCameraPreview
                   key={`${cameraUrl}-${cameraSession}`}
                   cameraUrl={cameraUrl}
-                  onStatusChange={(status) => setHwStatus((p) => (
-                    p.camera === status ? p : { ...p, camera: status }
-                  ))}
+                  onStatusChange={() => {}}
                 />
-              ) : capturedImage ? (
-                <img src={capturedImage} alt="Captura IA" className="w-full h-full object-cover" />
               ) : (
                 <div className="text-center text-gray-500 p-6">
                   <Camera className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">Câmera desconectada</p>
-                  <p className="text-xs mt-1 opacity-60">Configure a URL e clique em Conectar</p>
+                  <p className="text-sm">Nenhuma foto anexada</p>
+                  <p className="text-xs mt-1 opacity-60">Conecte a câmera ou envie uma imagem</p>
                 </div>
               )}
             </div>
@@ -352,76 +250,27 @@ export function RegisterWaste() {
                 className="w-full text-sm px-3 py-2 rounded-lg bg-[#F5F5F5] border border-transparent focus:border-[#2E7D32] focus:outline-none transition-all"
               />
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={conectarCamera} className="bg-[#2E7D32] hover:bg-[#1B5E20] text-white py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1">
+                <button type="button" onClick={conectarCamera} className="bg-[#2E7D32] hover:bg-[#1B5E20] text-white py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1">
                   <Wifi className="w-3.5 h-3.5" /> Conectar
                 </button>
-                <button onClick={capturarEAnalisar} disabled={isAnalyzing} className="bg-[#F5F5F5] hover:bg-[#E0E0E0] text-[#424242] py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1 disabled:opacity-50">
-                  <Camera className="w-3.5 h-3.5" /> Capturar
+                <button type="button" onClick={capturarFoto} disabled={isCapturing} className="bg-[#F5F5F5] hover:bg-[#E0E0E0] text-[#424242] py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1 disabled:opacity-50">
+                  {isCapturing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                  Capturar
                 </button>
               </div>
+              <label className="w-full cursor-pointer bg-[#F5F5F5] hover:bg-[#E8F5E9] text-[#424242] py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 text-sm border border-dashed border-gray-300 hover:border-[#2E7D32]">
+                <Upload className="w-4 h-4" /> Enviar Imagem
+                <input type="file" accept="image/*" className="hidden" onChange={handleUploadImagem} />
+              </label>
             </div>
           </div>
 
-          {/* AI Panel */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="font-semibold text-[#424242] flex items-center gap-2 text-sm">
-                <Brain className="w-4 h-4 text-[#2E7D32]" /> Análise por IA
-              </h3>
-              {aiResult && (
-                <span className="text-xs bg-[#2E7D32] text-white px-2 py-0.5 rounded-full font-medium">🤖 Detectado</span>
-              )}
-            </div>
-            <div className="p-4">
-              {aiResult ? (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-[#424242]">{aiResult.material_detectado}</span>
-                    <span className="text-sm font-bold text-[#2E7D32]">{aiResult.confianca.toFixed(1)}%</span>
-                  </div>
-                  <div className="text-xs text-[#717182]">{aiResult.categoria_detectada}</div>
-                  <div className="w-full bg-gray-100 rounded-full h-1.5">
-                    <div className="bg-[#2E7D32] h-1.5 rounded-full transition-all duration-700" style={{ width: `${aiResult.confianca}%` }} />
-                  </div>
-                  <p className="text-xs text-[#717182] leading-relaxed">{aiResult.observacao}</p>
-                  <div className="flex items-center gap-1 text-xs text-green-600 font-medium">
-                    <CheckCircle className="w-3 h-3" /> Formulário preenchido automaticamente
-                  </div>
-                </div>
-              ) : isAnalyzing ? (
-                <div className="text-center py-5">
-                  <RefreshCw className="w-8 h-8 text-[#2E7D32] animate-spin mx-auto mb-2" />
-                  <p className="text-sm text-[#717182]">Analisando material...</p>
-                </div>
-              ) : (
-                <div className="text-center py-5">
-                  <Brain className="w-8 h-8 text-gray-200 mx-auto mb-2" />
-                  <p className="text-sm text-[#717182]">Capture uma imagem ou clique em Analisar</p>
-                </div>
-              )}
-              <div className="space-y-2 mt-3">
-                <button onClick={analisarSemImagem} disabled={isAnalyzing} className="w-full bg-gradient-to-r from-[#2E7D32] to-[#66BB6A] hover:from-[#1B5E20] hover:to-[#4CAF50] text-white py-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-60 text-sm">
-                  {isAnalyzing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
-                  {isAnalyzing ? "Analisando..." : "Analisar Material"}
-                </button>
-                <label className="w-full cursor-pointer bg-[#F5F5F5] hover:bg-[#E8F5E9] text-[#424242] py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 text-sm border border-dashed border-gray-300 hover:border-[#2E7D32]">
-                  <Camera className="w-4 h-4" /> Enviar Imagem
-                  <input type="file" accept="image/*" className="hidden" onChange={handleUploadImagem} />
-                </label>
-              </div>
-            </div>
-          </div>
-
-          {/* Hardware Connect */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-            <h3 className="font-semibold text-[#424242] mb-3 flex items-center gap-2 text-sm">
-              <Cpu className="w-4 h-4 text-[#2E7D32]" /> Conectar Hardware
-            </h3>
-            <button onClick={conectarHardware} className="w-full bg-[#66BB6A] hover:bg-[#4CAF50] text-white py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 text-sm">
-              <Wifi className="w-4 h-4" /> Conectar ESP32 + Arduino
-            </button>
-            <p className="text-xs text-[#717182] mt-2 text-center">
-              Peso do sensor será preenchido automaticamente via WebSocket
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <p className="text-xs text-amber-800 leading-relaxed">
+              A foto é só um registro de evidência do material. O tipo, peso e
+              destino devem ser confirmados manualmente pela equipe ao lado —
+              a aparência de uma peça (pintura, tratamento superficial etc.)
+              pode não corresponder ao material real.
             </p>
           </div>
         </div>
@@ -429,20 +278,10 @@ export function RegisterWaste() {
         {/* ── RIGHT: Form ── */}
         <div className="lg:col-span-2">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 lg:p-8">
-            {isDetectedByAI && (
-              <div className="mb-5 px-4 py-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2 text-green-700">
-                <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                <span className="text-sm font-medium">Formulário preenchido automaticamente pela IA</span>
-              </div>
-            )}
-
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-sm font-medium text-[#424242] mb-2">
-                    Tipo de Material
-                    {isDetectedByAI && <span className="ml-2 text-xs bg-[#2E7D32] text-white px-1.5 py-0.5 rounded font-normal">IA</span>}
-                  </label>
+                  <label className="block text-sm font-medium text-[#424242] mb-2">Tipo de Material</label>
                   <select
                     value={formData.material_id}
                     onChange={(e) => {
@@ -454,7 +293,7 @@ export function RegisterWaste() {
                         category: mat?.category || prev.category,
                       }));
                     }}
-                    className={inputClass(isDetectedByAI)}
+                    className={inputClass()}
                     required
                   >
                     <option value="">Selecione o material</option>
@@ -462,25 +301,19 @@ export function RegisterWaste() {
                       <option key={m.id} value={String(m.id)}>{m.name}</option>
                     ))}
                   </select>
-                  {isDetectedByAI && !formData.material_id && (
-                    <p className="text-xs text-amber-600 mt-1">⚠️ IA detectou "{formData.materialType}" — selecione o material equivalente acima</p>
-                  )}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-[#424242] mb-2">
-                    Categoria
-                    {isDetectedByAI && <span className="ml-2 text-xs bg-[#2E7D32] text-white px-1.5 py-0.5 rounded font-normal">IA</span>}
-                  </label>
-                  <input type="text" value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} className={inputClass(isDetectedByAI)} placeholder="Ex: Metal Não Ferroso" />
+                  <label className="block text-sm font-medium text-[#424242] mb-2">Categoria</label>
+                  <input type="text" value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} className={inputClass()} placeholder="Ex: Metal Não Ferroso" />
                 </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-[#424242] mb-2">
                   Peso (kg)
-                  {hwStatus.sensor === "ativo" && <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-normal">Auto — Sensor HX711</span>}
+                  {pesoLive && <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-normal">Auto — Sensor HX711</span>}
                 </label>
-                <input type="text" inputMode="decimal" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value.replace(".", ",") })} className={inputClass(hwStatus.sensor === "ativo")} placeholder="0,000" required />
+                <input type="text" inputMode="decimal" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value.replace(".", ",") })} className={inputClass(pesoLive)} placeholder="0,000" required />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -497,11 +330,8 @@ export function RegisterWaste() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-[#424242] mb-2">
-                    Destino
-                    {isDetectedByAI && <span className="ml-2 text-xs bg-[#2E7D32] text-white px-1.5 py-0.5 rounded font-normal">IA</span>}
-                  </label>
-                  <select value={formData.destination} onChange={(e) => setFormData({ ...formData, destination: e.target.value })} className={inputClass(isDetectedByAI)} required>
+                  <label className="block text-sm font-medium text-[#424242] mb-2">Destino</label>
+                  <select value={formData.destination} onChange={(e) => setFormData({ ...formData, destination: e.target.value })} className={inputClass()} required>
                     <option value="">Selecione o destino</option>
                     <option value="reaproveitamento">Reaproveitamento Interno</option>
                     <option value="reciclagem">Reciclagem Externa</option>
@@ -538,11 +368,8 @@ export function RegisterWaste() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[#424242] mb-2">
-                  Observação
-                  {isDetectedByAI && <span className="ml-2 text-xs bg-[#2E7D32] text-white px-1.5 py-0.5 rounded font-normal">IA</span>}
-                </label>
-                <textarea value={formData.observation} onChange={(e) => setFormData({ ...formData, observation: e.target.value })} className={`${inputClass(isDetectedByAI)} resize-none`} rows={3} placeholder="Observações adicionais sobre o material..." />
+                <label className="block text-sm font-medium text-[#424242] mb-2">Observação</label>
+                <textarea value={formData.observation} onChange={(e) => setFormData({ ...formData, observation: e.target.value })} className={`${inputClass()} resize-none`} rows={3} placeholder="Observações adicionais sobre o material..." />
               </div>
 
               <button type="submit" disabled={isSubmitting} className="w-full bg-[#2E7D32] hover:bg-[#1B5E20] text-white py-3.5 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 text-base disabled:opacity-60 disabled:cursor-not-allowed">

@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   FileInput,
   Route,
-  Package,
   FileText,
   Settings,
   Recycle,
@@ -12,6 +11,7 @@ import {
   ScanLine,
   Tags,
   Camera,
+  BarChart3,
 } from "lucide-react";
 import { useState } from "react";
 import { useCurrentUser, canAccess } from "../lib/useCurrentUser";
@@ -22,9 +22,9 @@ const ALL_NAV = [
   { path: "/validation-station",label: "Posto de Validação",    icon: ScanLine        },
   { path: "/cameras",           label: "Câmeras",                icon: Camera          },
   { path: "/register-waste",    label: "Registrar Resíduo",     icon: FileInput       },
-  { path: "/tracking",          label: "Rastreamento",          icon: Route           },
-  { path: "/products",          label: "Produtos & Etiquetas",  icon: Tags            },
-  { path: "/materials",         label: "Gestão de Materiais",   icon: Package         },
+  { path: "/tracking",          label: "Validação de Expedição",icon: Route           },
+  { path: "/products",          label: "Cadastros",             icon: Tags            },
+  { path: "/materials",         label: "Análise do Processo",   icon: BarChart3       },
   { path: "/reports",           label: "Relatórios",            icon: FileText        },
   { path: "/settings",          label: "Configurações",         icon: Settings        },
 ];

@@ -9,7 +9,19 @@ const { Pool } = require('pg');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
 const { getUploadsDir } = require('./services/uploadDir');
+
+const uploadsDir = getUploadsDir();
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+const residuoFotoStorage = multer.diskStorage({
+  destination: uploadsDir,
+  filename: (req, file, cb) => {
+    const unique = `res_${Date.now()}_${Math.round(Math.random() * 1e6)}`;
+    cb(null, unique + path.extname(file.originalname || '.jpg'));
+  },
+});
+const uploadResiduoFoto = multer({ storage: residuoFotoStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 const databaseUrl = process.env.DATABASE_URL;
 const jwtSecret = process.env.JWT_SECRET;
@@ -306,17 +318,17 @@ if (hasFrontendBuild) {
 // Serve imagens capturadas pela IA
 app.use('/uploads', express.static(getUploadsDir()));
 
-// Rotas estendidas — Hardware, IA, Câmeras
+// Rotas estendidas — Hardware, Câmeras, Validação, Produtos, Análise do Processo
 const hardwareRoutes   = require('./routes/hardwareRoutes')(dbQuery, dbClient, io, authMiddleware);
-const aiRoutes         = require('./routes/aiRoutes')(dbQuery, dbClient, io, authMiddleware);
 const cameraRoutes     = require('./routes/cameraRoutes')(dbQuery, dbClient, io, authMiddleware);
 const validationRoutes = require('./routes/validationRoutes')(dbQuery, dbClient, io, authMiddleware);
 const productRoutes    = require('./routes/productRoutes')(dbQuery, dbClient, io, authMiddleware);
+const analysisRoutes   = require('./routes/analysisRoutes')(dbQuery, dbClient, io, authMiddleware);
 app.use('/api/hardware',   hardwareRoutes);
-app.use('/api/ia',         aiRoutes);
 app.use('/api/cameras',    cameraRoutes);
 app.use('/api/validacoes', validationRoutes);
 app.use('/api',             productRoutes);
+app.use('/api/analise',    analysisRoutes);
 
 // Dashboard IA stats
 app.get('/api/dashboard/stats/ia', authMiddleware, async (req, res) => {
@@ -338,10 +350,16 @@ app.get('/api/dashboard/stats/ia', authMiddleware, async (req, res) => {
 });
 
 // POST /api/residuos — registro principal (registros_residuos + wastes)
-app.post('/api/residuos', authMiddleware, async (req, res) => {
+// multipart/form-data: campos abaixo + arquivo opcional "foto" (evidência
+// fotográfica anexada manualmente pelo operador — não é usada para
+// classificar o material, só como registro).
+app.post('/api/residuos', authMiddleware, uploadResiduoFoto.single('foto'), async (req, res) => {
   try {
     const { material_id, peso, setor_origem, destino, observacao } = req.body;
     let { analise_ia_id } = req.body;
+    // foto: arquivo enviado agora, ou o caminho de uma foto já capturada
+    // antes via /api/cameras/snapshot (evita reenviar os mesmos bytes).
+    const fotoUrl = req.file ? `/uploads/${req.file.filename}` : (req.body.foto_url || null);
 
     if (!material_id) return res.status(400).json({ error: 'material_id é obrigatório' });
     if (!peso || Number(peso) <= 0) return res.status(400).json({ error: 'peso deve ser maior que zero' });
@@ -387,10 +405,10 @@ app.post('/api/residuos', authMiddleware, async (req, res) => {
     const insertRR = (uid) => dbQuery(
       `INSERT INTO registros_residuos
          (material_id, usuario_id, analise_ia_id, peso, setor_origem, destino, status, observacao,
-          prejuizo_descarte, custo_reaproveitamento, valor_economizado)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          prejuizo_descarte, custo_reaproveitamento, valor_economizado, foto_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [material_id, uid, analise_ia_id || null, peso, setor_origem || '', destino || '', rrStatus, observacao || '',
-       prejuizoDescarte, custoReaproveitamento, valorEconomizado]
+       prejuizoDescarte, custoReaproveitamento, valorEconomizado, fotoUrl]
     );
 
     if (dbClient === 'mysql') {
@@ -424,10 +442,10 @@ app.post('/api/residuos', authMiddleware, async (req, res) => {
     const rr = await dbQuery(
       `INSERT INTO registros_residuos
          (material_id, usuario_id, analise_ia_id, peso, setor_origem, destino, status, observacao,
-          prejuizo_descarte, custo_reaproveitamento, valor_economizado)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+          prejuizo_descarte, custo_reaproveitamento, valor_economizado, foto_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [material_id, req.user.id, analise_ia_id || null, peso, setor_origem || '', destino || '', rrStatus, observacao || '',
-       prejuizoDescarte, custoReaproveitamento, valorEconomizado]
+       prejuizoDescarte, custoReaproveitamento, valorEconomizado, fotoUrl]
     );
     await dbQuery(
       'INSERT INTO wastes (user_id, material_id, quantity, location, recovered, value) VALUES ($1,$2,$3,$4,$5,$6)',

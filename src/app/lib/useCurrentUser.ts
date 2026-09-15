@@ -35,7 +35,9 @@ export function canAccess(role: UserRole | undefined, path: string): boolean {
   if (!role) return false;
   if (role === 'admin') return true;
   const operadorRoutes = ['/', '/register-waste', '/tracking', '/validation-station', '/cameras'];
-  const gestorRoutes   = ['/', '/tracking', '/reports'];
+  // /materials agora é a Análise do Processo (só leitura de taxas/projeções,
+  // sem cadastro) — faz sentido para o gestor acompanhar.
+  const gestorRoutes   = ['/', '/tracking', '/reports', '/materials'];
   if (role === 'operador') return operadorRoutes.includes(path);
   if (role === 'gestor')   return gestorRoutes.includes(path);
   return false;
