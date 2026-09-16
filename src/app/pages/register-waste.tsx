@@ -193,7 +193,7 @@ export function RegisterWaste() {
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-2xl lg:text-3xl font-bold text-[#424242] mb-1">
-          Registro de Resíduos
+          Registro de Material
         </h1>
         <p className="text-[#717182]">
           Classificação manual pela equipe · foto só como evidência

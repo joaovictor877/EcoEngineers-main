@@ -21,7 +21,7 @@ const ALL_NAV = [
   { path: "/",                  label: "Dashboard",             icon: LayoutDashboard },
   { path: "/validation-station",label: "Posto de Validação",    icon: ScanLine        },
   { path: "/cameras",           label: "Câmeras",                icon: Camera          },
-  { path: "/register-waste",    label: "Registrar Resíduo",     icon: FileInput       },
+  { path: "/register-waste",    label: "Registrar Material",    icon: FileInput       },
   { path: "/tracking",          label: "Validação de Expedição",icon: Route           },
   { path: "/products",          label: "Cadastros",             icon: Tags            },
   { path: "/materials",         label: "Análise do Processo",   icon: BarChart3       },

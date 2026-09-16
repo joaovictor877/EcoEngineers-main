@@ -460,7 +460,7 @@ export function TrackingMaterial() {
               ) : residuos.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="text-center py-12 text-[#717182]">
-                    Nenhum resíduo registrado ainda. Use a página “Registro de Resíduos” para começar.
+                    Nenhum resíduo registrado ainda. Use a página “Registro de Material” para começar.
                   </td>
                 </tr>
               ) : (
