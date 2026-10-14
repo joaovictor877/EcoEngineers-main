@@ -105,26 +105,30 @@ CREATE TABLE IF NOT EXISTS registros_residuos (
 ) ENGINE=InnoDB;
 
 -- Dispositivos padrão
-INSERT INTO dispositivos (nome, tipo, status) SELECT 'ESP32 Principal','esp32','desconectado' WHERE NOT EXISTS (SELECT 1 FROM dispositivos WHERE nome='ESP32 Principal');
-INSERT INTO dispositivos (nome, tipo, status) SELECT 'Arduino Uno','arduino_uno','desconectado' WHERE NOT EXISTS (SELECT 1 FROM dispositivos WHERE nome='Arduino Uno');
-INSERT INTO dispositivos (nome, tipo, status) SELECT 'Sensor HX711','sensor_peso','desconectado' WHERE NOT EXISTS (SELECT 1 FROM dispositivos WHERE nome='Sensor HX711');
+INSERT INTO dispositivos (nome, tipo, status) SELECT 'ESP32 Principal','esp32','desconectado' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM dispositivos WHERE nome='ESP32 Principal');
+INSERT INTO dispositivos (nome, tipo, status) SELECT 'Arduino Uno','arduino_uno','desconectado' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM dispositivos WHERE nome='Arduino Uno');
+INSERT INTO dispositivos (nome, tipo, status) SELECT 'Sensor HX711','sensor_peso','desconectado' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM dispositivos WHERE nome='Sensor HX711');
 
 -- Câmera padrão
-INSERT INTO cameras (nome, url_stream) SELECT 'Câmera IP 01','http://192.168.1.120:8080' WHERE NOT EXISTS (SELECT 1 FROM cameras WHERE nome='Câmera IP 01');
+INSERT INTO cameras (nome, url_stream) SELECT 'Câmera IP 01','http://192.168.1.120:8080' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM cameras WHERE nome='Câmera IP 01');
 
 -- Seed sample materials
 INSERT INTO materials (name, category, unit)
 SELECT 'Aço', 'Metal', 'kg'
+FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM materials WHERE name = 'Aço');
 
 INSERT INTO materials (name, category, unit)
 SELECT 'Ferro', 'Metal', 'kg'
+FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM materials WHERE name = 'Ferro');
 
 INSERT INTO materials (name, category, unit)
 SELECT 'Alumínio', 'Metal', 'kg'
+FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM materials WHERE name = 'Alumínio');
 
 INSERT INTO materials (name, category, unit)
 SELECT 'Cobre', 'Metal', 'kg'
+FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM materials WHERE name = 'Cobre');

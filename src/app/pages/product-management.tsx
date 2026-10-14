@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import {
-  Plus, Edit, Trash2, RefreshCw, Tags, QrCode, X, Printer, Package, Search,
+  Plus, Edit, Trash2, RefreshCw, Tags, QrCode, X, Printer, Package, Search, Radio,
 } from "lucide-react";
+import { PostosPanel } from "../components/postos-panel";
 import { toast } from "sonner";
 import api from "../lib/api";
 
@@ -67,7 +68,7 @@ const MATERIAL_CATEGORY_COLORS: Record<string, string> = {
 };
 
 export function ProductManagement() {
-  const [tab, setTab] = useState<"produtos" | "materiais" | "etiquetas">("produtos");
+  const [tab, setTab] = useState<"produtos" | "materiais" | "etiquetas" | "postos">("produtos");
 
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
@@ -353,7 +354,7 @@ export function ProductManagement() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold text-[#424242] mb-1">Cadastros</h1>
-          <p className="text-[#717182]">Produtos, materiais e etiquetas usados no posto de validação</p>
+          <p className="text-[#717182]">Produtos, materiais, etiquetas e postos usados na validação</p>
         </div>
         <button onClick={loadAll} className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-[#717182]" title="Atualizar">
           <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
@@ -371,7 +372,12 @@ export function ProductManagement() {
         <button onClick={() => setTab("etiquetas")} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${tab === "etiquetas" ? "bg-[#2E7D32] text-white" : "text-[#717182] hover:bg-gray-50"}`}>
           <QrCode className="w-4 h-4" /> Etiquetas
         </button>
+        <button onClick={() => setTab("postos")} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${tab === "postos" ? "bg-[#2E7D32] text-white" : "text-[#717182] hover:bg-gray-50"}`}>
+          <Radio className="w-4 h-4" /> Postos e Linhas
+        </button>
       </div>
+
+      {tab === "postos" && <PostosPanel />}
 
       {tab === "produtos" && (
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">

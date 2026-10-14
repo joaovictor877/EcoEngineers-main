@@ -57,6 +57,37 @@ module.exports = function (dbQuery, dbClient, io, authMiddleware) {
     }
   });
 
+  // ─────────────────────────────────────────────────────────
+  // POST /api/hardware/calibracao — chamado por scripts/calibrar-balanca.ps1
+  // depois de calibrar o Arduino com um peso conhecido. Fica no mesmo
+  // histórico da calibração feita pela tela do Posto de Validação.
+  // Header: x-api-key: <HARDWARE_API_KEY>
+  // Body:   { "peso_referencia": 1.0, "peso_lido": 0.998, "posto_id": 1 }
+  // ─────────────────────────────────────────────────────────
+  router.post('/calibracao', hwKeyMiddleware, async (req, res) => {
+    const referencia = parseFloat(req.body.peso_referencia);
+    const lido = parseFloat(req.body.peso_lido);
+    if (!isFinite(referencia) || referencia <= 0 || !isFinite(lido) || lido < 0) {
+      return res.status(400).json({ error: 'peso_referencia (> 0) e peso_lido são obrigatórios' });
+    }
+    const erroMax = Number(process.env.CALIBRACAO_ERRO_MAX_PERCENT || 1);
+    const erro = Math.abs(lido - referencia) / referencia * 100;
+    const aprovada = erro <= erroMax;
+    const postoId = req.body.posto_id ? parseInt(req.body.posto_id, 10) : null;
+    try {
+      const ins = await dbQuery(
+        'INSERT INTO calibracoes_balanca (posto_id, peso_referencia, peso_lido, erro_percentual, aprovada, usuario_id) VALUES ($1,$2,$3,$4,$5,$6)',
+        [postoId, referencia, lido, erro.toFixed(3), aprovada ? 1 : 0, null]
+      );
+      const r = await dbQuery('SELECT * FROM calibracoes_balanca WHERE id = $1', [ins.raw.insertId]);
+      io.emit('calibracao_registrada', r.rows[0]);
+      return res.json({ ...r.rows[0], erro_maximo_percentual: erroMax });
+    } catch (err) {
+      console.error('[Hardware] Erro ao registrar calibração:', err.message);
+      return res.status(500).json({ error: 'Falha ao registrar calibração' });
+    }
+  });
+
   // GET /api/hardware/status
   router.get('/status', authMiddleware, async (req, res) => {
     try {

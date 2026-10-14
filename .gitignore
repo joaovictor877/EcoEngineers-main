@@ -20,3 +20,6 @@ Thumbs.db
 # Others
 dist/
 coverage/
+
+# Configuracao local da balanca (contem a chave do hardware)
+scripts/balanca.config.json

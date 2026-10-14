@@ -220,4 +220,54 @@ function extrairJpeg(buffer) {
   return buffer.subarray(start, end + 2);
 }
 
-module.exports = { analisarMaterial, capturarFrameCamera: capturarFrameCameraOtimizada };
+/**
+ * Terceira fonte do cruzamento imagem + peso + QR: pergunta ao modelo de
+ * visão se o item fotografado corresponde ao produto que a etiqueta diz.
+ * Sem OPENAI_API_KEY (ou se a chamada falhar) retorna null — a imagem fica
+ * como "não verificada" em vez de um resultado inventado.
+ * @returns {Promise<{confere: boolean, confianca: number, observacao: string}|null>}
+ */
+async function verificarImagemProduto(imagePath, produto) {
+  if (!process.env.OPENAI_API_KEY || !imagePath || !produto) return null;
+  try {
+    const base64 = fs.readFileSync(imagePath).toString('base64');
+    const ext = path.extname(imagePath).slice(1).replace('jpg', 'jpeg') || 'jpeg';
+    const prompt = `Você confere caixas num posto de embalagem industrial.
+A etiqueta (QR Code) desta caixa diz que o conteúdo é:
+- Produto: ${produto.nome}
+- SKU: ${produto.sku || 'não informado'}
+- Categoria: ${produto.categoria || 'não informada'}
+Olhe a imagem e diga se o item visível é compatível com esse produto. Ignore a etiqueta em si.
+Responda APENAS com JSON válido: {"confere": true, "confianca": 85.5, "observacao": "descrição breve"}`;
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:image/${ext};base64,${base64}`, detail: 'low' } },
+          ],
+        }],
+        max_tokens: 200,
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!resp.ok) throw new Error(`OpenAI API error: ${resp.status}`);
+    const data = await resp.json();
+    const match = (data.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('Resposta inválida da OpenAI');
+    const result = JSON.parse(match[0]);
+    let confianca = Number(result.confianca) || 0;
+    if (confianca > 0 && confianca <= 1) confianca *= 100;
+    return { confere: result.confere === true, confianca, observacao: String(result.observacao || '') };
+  } catch (e) {
+    console.warn('[IA] Verificação de imagem indisponível:', e.message);
+    return null;
+  }
+}
+
+module.exports = { analisarMaterial, verificarImagemProduto, capturarFrameCamera: capturarFrameCameraOtimizada };

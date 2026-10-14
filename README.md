@@ -34,6 +34,18 @@ Posto de validação (novo):
 - GET /api/validacoes/postos — postos de validação cadastrados
 - GET/POST/PUT/DELETE /api/produtos — catálogo de produtos esperados
 - GET/POST/DELETE /api/etiquetas — etiquetas com QR Code (POST gera o QR automaticamente)
+- POST/PUT/DELETE /api/validacoes/postos — postos por linha (linha + código = tópico MQTT)
+- GET /api/validacoes/caixa/:codigo — situação da caixa no despacho (liberada / retida)
+- GET/POST /api/validacoes/calibracoes — calibração da balança contra massa padrão
+- GET /api/push/chave-publica, POST /api/push/inscrever — alerta Web Push no celular do gestor
+
+Critérios (imagem + peso + QR Code): reprova se o QR não tem etiqueta, se o peso sai da
+tolerância do produto ou se a imagem não confere com o produto (com `OPENAI_API_KEY`).
+Caixa reprovada fica **retida** e só é liberada por uma nova validação aprovada.
+
+MQTT: broker embutido no servidor (TCP 1883 e `wss://<servidor>/mqtt`). O ESP32 do posto
+publica pelo Wi-Fi em `<linha>/<posto>/validacao`; o servidor responde em `<linha>/<posto>/resultado` e
+`alertas/<linha>/<posto>`. Ver `hardware/README.md` e o app Android em `android/`.
 
 Token JWT deve ser enviado em Authorization: Bearer <token>
 
@@ -44,8 +56,15 @@ Variáveis de ambiente atuais:
 - JWT_SECRET=chave-secreta-forte
 - DB_SCHEMA=public
 - DB_SSL=false
-- MQTT_BROKER_URL (opcional) — só necessário quando o gateway LoRa físico estiver disponível;
-  sem essa variável o sistema usa normalmente o caminho HTTP/Socket.IO já existente.
+- MQTT_BROKER_URL (opcional) — broker externo; sem ela o servidor sobe o broker embutido
+- MQTT_EMBEDDED=false (opcional) — desliga o broker embutido
+- MQTT_PORT (opcional, padrão 1883) — porta TCP do broker embutido
+- HARDWARE_API_KEY — senha do posto no broker e nas rotas de hardware
+- OPENAI_API_KEY (opcional) — ativa a verificação da imagem contra o produto
+- IMAGEM_CONFIANCA_MIN (padrão 60) — confiança mínima para a imagem reprovar
+- CALIBRACAO_VALIDADE_DIAS (padrão 7), CALIBRACAO_ERRO_MAX_PERCENT (padrão 1),
+  CALIBRACAO_OBRIGATORIA=true (reprova caixa pesada com balança sem calibração válida)
+- VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY (opcionais) — sem elas, são geradas e guardadas no banco
 
 Quer publicar no Git?
 

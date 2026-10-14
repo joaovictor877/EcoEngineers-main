@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.EcoEngineers" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">#2E7D32</item>
+        <item name="colorPrimaryDark">#1B5E20</item>
+        <item name="colorAccent">#66BB6A</item>
+        <item name="android:statusBarColor">#2E7D32</item>
+    </style>
+</resources>

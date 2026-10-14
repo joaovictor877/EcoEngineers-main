@@ -13,9 +13,23 @@ import {
   Camera,
   BarChart3,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useCurrentUser, canAccess } from "../lib/useCurrentUser";
 import { PageHeader } from "./page-header";
+import api from "../lib/api";
+import { socket } from "../lib/socket";
+import { bipe, getAlertPrefs, notificarSistema } from "../lib/alerts";
+
+interface ValidacaoEvento {
+  id: number;
+  resultado: "aprovado" | "reprovado";
+  resolvido?: number | boolean;
+  motivo_divergencia: string | null;
+  produto_nome: string | null;
+  qrcode_lido: string | null;
+  posto_nome?: string | null;
+}
 
 const ALL_NAV = [
   { path: "/",                  label: "Dashboard",             icon: LayoutDashboard },
@@ -34,6 +48,39 @@ export function Layout() {
   const user = useCurrentUser();
 
   const navItems = ALL_NAV.filter((item) => canAccess(user?.role, item.path));
+
+  // Alerta imediato de caixa reprovada em QUALQUER tela do sistema, e
+  // contador de caixas retidas (reprovações ainda não resolvidas) no menu.
+  const [retidas, setRetidas] = useState(0);
+  useEffect(() => {
+    const atualizarContador = () =>
+      api.get<{ reprovadas_abertas: number }>("/api/validacoes/stats")
+        .then((r) => setRetidas(Number(r.data.reprovadas_abertas || 0)))
+        .catch(() => {});
+    atualizarContador();
+
+    const onValidacao = (v: ValidacaoEvento) => {
+      if (v.resultado !== "reprovado") return;
+      setRetidas((n) => n + 1);
+      const prefs = getAlertPrefs();
+      if (!prefs.reprovacoes) return;
+      const caixa = v.qrcode_lido || `#${v.id}`;
+      const titulo = `Caixa ${caixa} reprovada e retida`;
+      const detalhe = `${v.produto_nome ? v.produto_nome + " — " : ""}${v.motivo_divergencia || "verifique a caixa"}`;
+      toast.error(titulo, { description: detalhe, duration: 10000 });
+      if (prefs.som) bipe();
+      if (document.hidden) notificarSistema(titulo, detalhe);
+    };
+
+    socket.connect();
+    socket.on("validacao_concluida", onValidacao);
+    socket.on("validacao_resolvida", atualizarContador);
+    return () => {
+      socket.off("validacao_concluida", onValidacao);
+      socket.off("validacao_resolvida", atualizarContador);
+      socket.disconnect();
+    };
+  }, []);
 
   return (
     <div className="flex h-screen bg-[#F5F5F5]">
@@ -90,7 +137,15 @@ export function Layout() {
                   }
                 >
                   <item.icon className="w-5 h-5" />
-                  <span className="text-sm">{item.label}</span>
+                  <span className="text-sm flex-1">{item.label}</span>
+                  {item.path === "/tracking" && retidas > 0 && (
+                    <span
+                      className="min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center"
+                      title={`${retidas} caixa(s) retida(s)`}
+                    >
+                      {retidas}
+                    </span>
+                  )}
                 </NavLink>
               </li>
             ))}

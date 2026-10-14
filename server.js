@@ -46,7 +46,14 @@ if (dbClient === 'mysql') {
     uri: databaseUrl,
     ssl: dbSsl ? {} : undefined,
     waitForConnections: true,
-    connectionLimit: 10
+    connectionLimit: 10,
+    // O banco derruba conexões ociosas; sem isso o pool reusa uma conexão
+    // morta e a consulta falha com "read ETIMEDOUT" / "ECONNRESET".
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
+    maxIdle: 3,
+    idleTimeout: 60000,
+    connectTimeout: 15000
   });
 } else {
   pool = new Pool({
@@ -63,10 +70,20 @@ function toMysqlPlaceholders(sql) {
   return sql.replace(/\$\d+/g, '?');
 }
 
+// Falhas de conexão (não de SQL): vale tentar de novo uma vez com outra conexão do pool.
+const ERROS_CONEXAO = new Set(['ETIMEDOUT', 'ECONNRESET', 'EPIPE', 'PROTOCOL_CONNECTION_LOST', 'ECONNREFUSED']);
+
 async function dbQuery(sql, params = []) {
   if (dbClient === 'mysql') {
-    const [result] = await pool.query(toMysqlPlaceholders(sql), params);
-    return { rows: result, raw: result };
+    try {
+      const [result] = await pool.query(toMysqlPlaceholders(sql), params);
+      return { rows: result, raw: result };
+    } catch (err) {
+      if (!ERROS_CONEXAO.has(err.code)) throw err;
+      console.warn(`[DB] Conexão perdida (${err.code}) — tentando de novo`);
+      const [result] = await pool.query(toMysqlPlaceholders(sql), params);
+      return { rows: result, raw: result };
+    }
   }
   const result = await pool.query(sql, params);
   return { rows: result.rows, raw: result };
@@ -310,7 +327,7 @@ if (hasFrontendBuild) {
   app.use(express.static(distDir));
 
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api/')) return next();
+    if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) return next();
     res.sendFile(distIndex);
   });
 }
@@ -329,6 +346,36 @@ app.use('/api/cameras',    cameraRoutes);
 app.use('/api/validacoes', validationRoutes);
 app.use('/api',             productRoutes);
 app.use('/api/analise',    analysisRoutes);
+
+// Web Push — alerta de caixa reprovada no celular do gestor, mesmo com o app fechado.
+const notificationService = require('./services/notificationService');
+app.get('/api/push/chave-publica', authMiddleware, (req, res) => {
+  if (!notificationService.vapidPublicKey) return res.status(503).json({ error: 'Web Push indisponível' });
+  res.json({ publicKey: notificationService.vapidPublicKey });
+});
+app.post('/api/push/inscrever', authMiddleware, async (req, res) => {
+  const { endpoint, keys } = req.body || {};
+  if (!endpoint || !keys || !keys.p256dh || !keys.auth) return res.status(400).json({ error: 'Inscrição inválida' });
+  try {
+    await dbQuery('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]);
+    await dbQuery(
+      'INSERT INTO push_subscriptions (usuario_id, endpoint, p256dh, auth) VALUES ($1, $2, $3, $4)',
+      [req.user.id, endpoint, keys.p256dh, keys.auth]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Push] Falha ao inscrever:', err.message);
+    res.status(500).json({ error: 'Falha ao salvar inscrição' });
+  }
+});
+app.post('/api/push/cancelar', authMiddleware, async (req, res) => {
+  try {
+    await dbQuery('DELETE FROM push_subscriptions WHERE endpoint = $1', [String((req.body || {}).endpoint || '')]);
+    res.json({ ok: true });
+  } catch (_) {
+    res.json({ ok: true });
+  }
+});
 
 // Dashboard IA stats
 app.get('/api/dashboard/stats/ia', authMiddleware, async (req, res) => {
@@ -624,7 +671,8 @@ async function start() {
   try {
     await dbQuery('SELECT 1');
     await require('./services/migrationRunner').runMigrations(dbClient, databaseUrl, dbSsl);
-    require('./services/mqttService').start(dbQuery, io);
+    await require('./services/notificationService').initPush(dbQuery);
+    require('./services/mqttService').start(dbQuery, dbClient, io, httpServer);
     httpServer.listen(port, () => console.log(`[EcoEngineers] Server running on :${port} | db=${dbClient} schema=${dbSchema} | Socket.IO enabled`));
   } catch (err) {
     console.error('Failed to connect to database on startup:', err.message);

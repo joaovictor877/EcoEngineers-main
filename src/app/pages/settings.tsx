@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { NotificationSettings } from "../components/notification-settings";
 import { User, Building, Bell, Shield, Database, Wifi } from "lucide-react";
 import { toast } from "sonner";
 
@@ -148,58 +149,7 @@ export function Settings() {
               </div>
             )}
 
-            {activeTab === "notifications" && (
-              <div>
-                <h2 className="text-xl font-semibold text-[#424242] mb-6">
-                  Preferências de Notificação
-                </h2>
-                <div className="space-y-4">
-                  {[
-                    {
-                      label: "Notificações de novos registros",
-                      description: "Receba alertas quando novos resíduos forem registrados",
-                    },
-                    {
-                      label: "Alertas de metas de sustentabilidade",
-                      description: "Notificações sobre o atingimento de metas ESG",
-                    },
-                    {
-                      label: "Relatórios semanais",
-                      description: "Receba um resumo semanal por email",
-                    },
-                    {
-                      label: "Alertas de hardware",
-                      description: "Notificações sobre status dos dispositivos conectados",
-                    },
-                  ].map((item, index) => (
-                    <label
-                      key={index}
-                      className="flex items-start gap-3 p-4 rounded-lg hover:bg-[#F5F5F5] transition-colors cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        defaultChecked
-                        className="mt-1 w-5 h-5 rounded border-gray-300 text-[#2E7D32] focus:ring-[#2E7D32]"
-                      />
-                      <div className="flex-1">
-                        <div className="text-sm font-medium text-[#424242]">
-                          {item.label}
-                        </div>
-                        <div className="text-xs text-[#717182] mt-1">
-                          {item.description}
-                        </div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-                <button
-                  onClick={handleSave}
-                  className="bg-[#2E7D32] hover:bg-[#1B5E20] text-white px-6 py-3 rounded-lg transition-colors font-medium mt-6"
-                >
-                  Salvar Preferências
-                </button>
-              </div>
-            )}
+            {activeTab === "notifications" && <NotificationSettings />}
 
             {activeTab === "security" && (
               <div>

@@ -6,6 +6,7 @@ import {
 import { toast } from "sonner";
 import api from "../lib/api";
 import { socket } from "../lib/socket";
+import { PushButton } from "../components/notification-settings";
 
 interface Validacao {
   id: number;
@@ -18,8 +19,12 @@ interface Validacao {
   criado_em: string;
   resolvido: number | boolean;
   resolvido_em: string | null;
-  status_entrega: "expedido" | "entregue";
+  status_entrega: "expedido" | "entregue" | "retido";
   entregue_em: string | null;
+  posto_nome?: string | null;
+  origem?: "web" | "mqtt";
+  origem_peso?: "balanca" | "manual";
+  imagem_confere?: number | null;
 }
 
 interface Residuo {
@@ -89,12 +94,8 @@ export function TrackingMaterial() {
       });
     };
 
-    const onValidacao = (data: Validacao) => {
-      upsert(data);
-      if (data.resultado === "reprovado") {
-        toast.error(`❌ Problema detectado na expedição — ${data.produto_nome || "item"}: ${data.motivo_divergencia || "verifique"}`);
-      }
-    };
+    // O alerta de reprovação é mostrado pelo layout, em qualquer tela.
+    const onValidacao = (data: Validacao) => upsert(data);
 
     socket.on("validacao_concluida", onValidacao);
     socket.on("validacao_resolvida", upsert);
@@ -129,7 +130,7 @@ export function TrackingMaterial() {
     try {
       const { data } = await api.put<Validacao>(`/api/validacoes/${id}/resolver`);
       setValidacoes((prev) => prev.map((v) => (v.id === id ? { ...v, ...data } : v)));
-      toast.success("Problema marcado como resolvido.");
+      toast.success("Problema marcado como resolvido. A caixa só é liberada após nova validação aprovada.");
     } catch {
       toast.error("Falha ao marcar como resolvido");
     } finally {
@@ -143,8 +144,8 @@ export function TrackingMaterial() {
       const { data } = await api.put<Validacao>(`/api/validacoes/${id}/entregar`);
       setValidacoes((prev) => prev.map((v) => (v.id === id ? { ...v, ...data } : v)));
       toast.success("Item marcado como entregue.");
-    } catch {
-      toast.error("Falha ao marcar como entregue");
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || "Falha ao marcar como entregue");
     } finally {
       setEntregandoId(null);
     }
@@ -167,13 +168,16 @@ export function TrackingMaterial() {
           <h1 className="text-3xl font-bold text-[#424242] mb-1">Validação de Expedição</h1>
           <p className="text-[#717182]">Empacotamento → validação → envio — acompanhe e corrija antes de expedir</p>
         </div>
-        <button
-          onClick={loadData}
-          className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-[#717182]"
-          title="Atualizar"
-        >
-          <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          <PushButton />
+          <button
+            onClick={loadData}
+            className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-[#717182]"
+            title="Atualizar"
+          >
+            <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
       </div>
 
       {/* Alerta de problemas em aberto — sempre visível, mesmo fora da aba de validações */}
@@ -346,7 +350,14 @@ export function TrackingMaterial() {
                               </button>
                             )
                           ) : (
-                            <span className="text-xs text-gray-400">—</span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700" title="Caixa reprovada não pode seguir para o despacho">
+                              <AlertTriangle className="w-3 h-3" /> Retida
+                            </span>
+                          )}
+                          {(v.origem === "mqtt" || v.origem_peso === "manual") && (
+                            <span className="block mt-1 text-[11px] text-[#717182]">
+                              {v.origem === "mqtt" ? "via posto (MQTT)" : "peso manual"}
+                            </span>
                           )}
                         </td>
                         <td className="px-6 py-4"><span className="text-sm text-[#717182]">{v.criado_em ? new Date(v.criado_em).toLocaleString("pt-BR") : "—"}</span></td>

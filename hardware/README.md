@@ -1,116 +1,129 @@
 # Hardware de peso - Arduino UNO + HX711
 
-Este projeto ja possui o endpoint online para receber peso:
+Fluxo da balanca ate o site:
 
 ```text
-POST /api/hardware/peso
-Header: x-api-key: <HARDWARE_API_KEY>
-Body: { "peso": 1.23, "dispositivo": "Arduino UNO HX711" }
+Celula de carga -> HX711 -> Arduino UNO -> USB do notebook -> iniciar-balanca.bat -> site online
 ```
 
-Como o Arduino UNO nao tem internet, use este fluxo:
+## Passo a passo rapido
 
-```text
-Celula de carga -> HX711 -> Arduino UNO -> USB do notebook -> bridge PowerShell -> site online
-```
+| Passo | O que fazer | Quando |
+|---|---|---|
+| 1 | Montar e gravar o sketch no Arduino | uma vez |
+| 2 | Clicar duas vezes em `scripts\calibrar-balanca.bat` | uma vez (e quando trocar/mexer na balanca) |
+| 3 | Clicar duas vezes em `scripts\iniciar-balanca.bat` | sempre que for usar |
 
-## 1. Subir o sketch no Arduino
+### 1. Montar e gravar o sketch (uma vez)
 
-Abra no Arduino IDE:
-
-```text
-hardware/arduino_hx711_weight/arduino_hx711_weight.ino
-```
-
-Instale a biblioteca `HX711` pelo Library Manager.
-
-Ligacao usada no sketch:
+Ligacao:
 
 ```text
 HX711 VCC -> Arduino 5V
 HX711 GND -> Arduino GND
 HX711 DT  -> Arduino D3
 HX711 SCK -> Arduino D2
+
+Celula de carga -> HX711:  vermelho E+ | preto E- | branco A- | verde A+
 ```
 
-Abra o Serial Monitor em `57600 baud`.
+1. Arduino IDE > **Sketch > Include Library > Manage Libraries** > instale **HX711** (Bogdan Necula).
+2. Abra `hardware/arduino_hx711_weight/arduino_hx711_weight.ino`.
+3. **Tools > Board > Arduino Uno** e **Tools > Port** > a porta do Arduino.
+4. Clique em **Upload** (seta). Feche o Arduino IDE depois (ele prende a porta COM).
 
-Para zerar a balanca, envie:
+### 2. Calibrar (uma vez)
+
+Separe um objeto de **peso conhecido** (pacote de 1 kg de arroz/acucar, peso de academia,
+garrafa de 1,5 L de agua ~ 1,5 kg). Quanto mais pesado (dentro do limite da celula), melhor.
+
+Clique duas vezes em **`scripts\calibrar-balanca.bat`** e siga as perguntas:
+
+1. Na primeira vez ele pede o **endereco do site**, a **chave do hardware** (`HARDWARE_API_KEY`
+   do servidor) e o **numero do posto**. Fica salvo em `scripts/balanca.config.json`.
+2. Balanca vazia -> ENTER (zera).
+3. Digita o peso do objeto em kg (ex: `1` ou `0,5`).
+4. Coloca o objeto no centro -> ENTER. O Arduino calcula o fator **sozinho** e grava na memoria.
+5. O script confere a leitura e mostra o erro. Ate **1%** esta aprovado; acima disso ele oferece repetir.
+6. Tira o objeto -> confere se volta a 0.
+7. Registra a calibracao no sistema: o **Posto de Validacao** passa a mostrar "Balanca calibrada".
+
+A calibracao fica salva no Arduino mesmo desligando. So refaca se mexer na celula de carga,
+trocar o Arduino, ou se o sistema avisar que a calibracao venceu (padrao: 7 dias,
+`CALIBRACAO_VALIDADE_DIAS`).
+
+### 3. Ligar a balanca no sistema (sempre que for usar)
+
+Clique duas vezes em **`scripts\iniciar-balanca.bat`** e deixe a janela aberta (pode minimizar).
+
+- Ele acha o Arduino sozinho (nao precisa saber a porta COM).
+- So envia o peso quando a leitura **estabiliza** (8 leituras com variacao de ate 0,05 kg).
+- Se o cabo USB soltar ou a internet cair, ele **reconecta sozinho**.
+- No site, abra **Posto de Validacao**: o card "Balanca" fica ativo e o peso aparece sozinho.
+
+Para abrir automaticamente quando o Windows ligar (rode uma vez num PowerShell, na pasta do projeto):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\iniciar-balanca.ps1 -InstalarInicializacao
+```
+
+(Para desfazer: `-RemoverInicializacao`. Para trocar endereco/chave/posto: `-Reconfigurar`.)
+
+### Problemas comuns
+
+| Sintoma | Causa provavel | O que fazer |
+|---|---|---|
+| "Arduino nao encontrado" | cabo so de carga / driver CH340 | troque o cabo; em clones instale o driver CH340 |
+| "Nao consegui abrir COMx" | outro programa usando a porta | feche o Arduino IDE (Serial Monitor) e o iniciar-balanca |
+| `hx711_not_ready` | fio DT/SCK trocado ou solto | confira D3 (DT) e D2 (SCK) e o 5V/GND |
+| Peso negativo | fios A+/A- invertidos | inverta branco e verde no HX711, ou rode a calibracao de novo |
+| Peso "anda" sozinho | celula solta ou mesa balancando | aperte os parafusos da celula, apoie em superficie firme |
+| Erro de calibracao alto | objeto fora do centro | centralize o objeto e repita |
+| Site nao recebe (401) | chave errada | rode com `-Reconfigurar` e confira `HARDWARE_API_KEY` no servidor |
+
+### Comandos manuais (Serial Monitor, 57600 baud)
+
+`t` zera · `k1.000` calibra com 1 kg · `c-7050` define o fator na mao · `s` mostra fator e tara · `r` apaga a calibracao.
+
+A ponte antiga continua funcionando se quiser passar a porta e a chave na mao:
+
+```powershell
+.\scripts\bridge-hx711-online.ps1 -PortName COM18 -ApiUrl https://ecoengineers.azurewebsites.net/api/hardware/peso -ApiKey SUA_CHAVE
+```
+
+## 4. Posto conectado por Wi-Fi + MQTT (arquitetura da pre-banca)
 
 ```text
-t
+Posto (HX711 + leitor de QR + ESP32) --Wi-Fi/MQTT--> Broker --> Servidor --> App/site
 ```
 
-## 2. Rodar a ponte para o site online
+- `posto_wifi_mqtt/posto_wifi_mqtt.ino` — le o QR da caixa e o peso estavel e publica em
+  `linha-01/posto-03/validacao` `{"caixa":"<caixa>","peso":2.451}`. Assina
+  `linha-01/posto-03/resultado` e acende LED verde (aprovada) ou vermelho (retida).
 
-Descubra a porta COM do Arduino no Arduino IDE em `Tools > Port`.
+O broker MQTT ja vem embutido no servidor (sem `MQTT_BROKER_URL`): TCP na porta `MQTT_PORT`
+(padrao 1883, rede local) e WebSocket em `wss://<servidor>/mqtt` (funciona no Azure).
+Login do posto no broker: usuario `hardware`, senha = `HARDWARE_API_KEY`.
+Com o servidor no Azure, a porta 1883 nao fica exposta: use um broker externo
+(`MQTT_BROKER_URL`) ou um servidor na rede local para o ESP32 publicar.
 
-No PowerShell, rode:
+| Topico | Quem publica | Conteudo |
+|---|---|---|
+| `<linha>/<posto>/validacao` | posto | `{ "caixa": "...", "peso": 2.45 }` -> servidor valida e grava |
+| `<linha>/<posto>/peso` | posto | `{ "peso": 2.45 }` -> leitura ao vivo na tela |
+| `<linha>/<posto>/resultado` | servidor | resultado de toda validacao |
+| `alertas/<linha>/<posto>` | servidor | so reprovacoes (o app Android assina) |
+
+A linha e o codigo do posto sao cadastrados em **Cadastros > Postos e Linhas**. Se o posto tiver
+camera vinculada, o servidor captura a imagem dela quando a validacao chega por MQTT.
+
+Sem a placa, simule o posto:
 
 ```powershell
-$env:HARDWARE_API_URL="https://ecoengineers.azurewebsites.net/api/hardware/peso"
-$env:HARDWARE_API_KEY="eco-hw-key-2026"
-.\scripts\bridge-hx711-online.ps1 -PortName COM18
+node scripts/simular-posto-mqtt.js --url wss://ecoengineers.azurewebsites.net/mqtt --key SUA_HARDWARE_API_KEY --linha linha-01 --posto posto-01
 ```
 
-Troque `COM18` pela porta real.
-
-Deixe essa janela aberta. Quando o Arduino enviar peso pela serial, o script manda para o backend online e a tela do site recebe pelo Socket.IO.
-
-Por padrao, a ponte so envia o peso quando a leitura fica estavel em uma janela de 8 amostras, com variacao maxima de `0.05 kg`.
-Para deixar mais firme, use um range menor:
-
-```powershell
-.\scripts\bridge-hx711-online.ps1 -PortName COM18 -StableRangeKg 0.03 -StableWindow 10
-```
-
-Para responder mais rapido, use uma janela menor:
-
-```powershell
-.\scripts\bridge-hx711-online.ps1 -PortName COM18 -StableRangeKg 0.06 -StableWindow 5
-```
-
-## 3. Apresentacao
-
-1. Abra o site online.
-2. Entre em `Registrar Residuo`.
-3. Rode o script da ponte no notebook.
-4. Coloque peso na celula de carga.
-5. O campo `Peso (kg)` deve preencher automaticamente.
-
-Se o valor ficar negativo, inverta o sinal de `CALIBRATION_FACTOR` no `.ino`.
-Tambem da para inverter sem reenviar o sketch usando `-InvertSign`:
-
-```powershell
-.\scripts\bridge-hx711-online.ps1 -PortName COM18 -StableRangeKg 0.03 -StableWindow 10 -InvertSign
-```
-
-Para zerar a balanca pelo script, deixe ela vazia e use:
-
-```powershell
-.\scripts\bridge-hx711-online.ps1 -PortName COM18 -TareOnStart
-```
-
-Se o valor ficar errado, ajuste `CALIBRATION_FACTOR` ate bater com um peso conhecido.
-
-## 4. Quando o modulo LoRa + gateway chegar
-
-O mapa mental do posto de validacao prevê `Balanca/Camera -> Microcontrolador -> Modulo LoRa
--> Gateway -> Broker MQTT -> Backend`. Esse caminho ainda depende de hardware fisico que o
-projeto nao tem em maos hoje, entao o fluxo atual (Wi-Fi HTTP direto do ESP32, ou Arduino UNO
-via USB + `bridge-hx711-online.ps1`) continua sendo o caminho valido para testes e demonstracao.
-
-Quando o gateway LoRa estiver disponivel, o backend ja tem um adaptador pronto em
-`services/mqttService.js`: basta configurar a variavel de ambiente `MQTT_BROKER_URL` (e
-`MQTT_USERNAME`/`MQTT_PASSWORD` se o broker exigir) e o gateway passar a publicar nos topicos:
-
-```text
-postos/<posto_id>/peso       -> { "peso": 2.45, "dispositivo": "Posto 01" }
-postos/<posto_id>/validacao  -> payload livre
-```
-
-Sem essa variavel definida, o adaptador MQTT fica desativado e nao muda nada do
-comportamento atual.
+O caminho por HTTP/USB (secoes 1 a 3) continua valido para testes.
 
 ## 5. Camera Intelbras Mibo (RTSP) quando o servidor esta na nuvem (Azure/VPS)
 

@@ -27,7 +27,9 @@ export default defineConfig({
       },
       workbox: {
         // Não faz cache das chamadas de API/stream — precisam ser sempre em tempo real
-        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/socket\.io\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/socket\.io\//, /^\/mqtt/],
+        // Handler de Web Push (alerta de caixa reprovada com o app fechado)
+        importScripts: ['/push-sw.js'],
       },
     }),
   ],
@@ -54,6 +56,11 @@ export default defineConfig({
       '/uploads': {
         target: 'http://localhost:4000',
         changeOrigin: true,
+      },
+      '/mqtt': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        ws: true,
       },
     },
   },

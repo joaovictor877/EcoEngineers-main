@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">EcoEngineers Gestor</string>
+    <string name="canal_alertas">Caixas reprovadas</string>
+    <string name="canal_servico">Monitoramento do posto</string>
+</resources>

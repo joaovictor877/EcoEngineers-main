@@ -23,6 +23,7 @@ SELECT
   'https://camera.joaovictor.app.br/video',
   'https://camera.joaovictor.app.br/photo.jpg',
   'ativa'
+FROM DUAL
 WHERE NOT EXISTS (
   SELECT 1 FROM cameras WHERE url_base = 'https://camera.joaovictor.app.br'
 );

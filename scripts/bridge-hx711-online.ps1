@@ -143,8 +143,15 @@ try {
       $lastSentWeight = $stableWeight
       Write-Host ("Peso estavel enviado: {0:N3} kg" -f $stableWeight)
     } catch [System.TimeoutException] {
+      if ([System.IO.Ports.SerialPort]::GetPortNames() -notcontains $PortName) {
+        throw "Arduino desconectado ($PortName)"
+      }
       continue
     } catch {
+      # Cabo USB solto: sai para o iniciar-balanca reconectar sozinho.
+      if ([System.IO.Ports.SerialPort]::GetPortNames() -notcontains $PortName) {
+        throw "Arduino desconectado ($PortName)"
+      }
       Write-Warning $_.Exception.Message
       Start-Sleep -Milliseconds 900
     }

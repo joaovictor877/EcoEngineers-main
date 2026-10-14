@@ -77,19 +77,23 @@ CREATE TABLE IF NOT EXISTS validacoes (
 -- ── Posto de validação padrão ──────────────────────────────────
 INSERT INTO postos_validacao (nome, localizacao, status)
 SELECT 'Posto de Embalagem 01', 'Expedição', 'ativo'
+FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM postos_validacao WHERE nome = 'Posto de Embalagem 01');
 
 -- ── Produtos de exemplo para demonstração ─────────────────────────
 INSERT INTO produtos (sku, nome, categoria, peso_esperado_kg, tolerancia_kg)
 SELECT 'SKU-1001', 'Kit de Engrenagens A', 'Componentes Mecânicos', 2.500, 0.050
+FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM produtos WHERE sku = 'SKU-1001');
 
 INSERT INTO produtos (sku, nome, categoria, peso_esperado_kg, tolerancia_kg)
 SELECT 'SKU-1002', 'Conjunto de Parafusos B', 'Fixadores', 0.800, 0.030
+FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM produtos WHERE sku = 'SKU-1002');
 
 INSERT INTO produtos (sku, nome, categoria, peso_esperado_kg, tolerancia_kg)
 SELECT 'SKU-1003', 'Placa Estampada C', 'Estamparia', 4.200, 0.080
+FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM produtos WHERE sku = 'SKU-1003');
 
 -- ── Etiquetas/QR de exemplo, vinculadas aos produtos acima ────────

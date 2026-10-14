@@ -129,6 +129,7 @@ ALTER TABLE wastes             CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_
 -- ── 5. Adicionar câmera padrão se não existir ────────────────────
 INSERT INTO cameras (nome, url_stream, status)
 SELECT 'Câmera IP Principal', 'https://camera.joaovictor.app.br', 'ativa'
+FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM cameras WHERE url_stream = 'https://camera.joaovictor.app.br');
 
 SET FOREIGN_KEY_CHECKS = 1;
